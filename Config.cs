@@ -152,6 +152,10 @@ namespace RdpPanel
         // FPS display (how many times per second the screen of a session changes)
         public bool ShowFps = true;
 
+        // update check (GitHub releases)
+        public bool CheckForUpdates = true;
+        public string SkippedVersion = "";   // version the user clicked "Skip" on
+
         // first start: show the tutorial once
         public bool TutorialDone;
 

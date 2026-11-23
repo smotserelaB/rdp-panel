@@ -45,6 +45,12 @@ namespace RdpPanel
         readonly Panel content = new Panel();
         readonly Panel footer = new Panel();
 
+        // update banner (shown when a newer release exists on GitHub)
+        readonly Panel updateBar = new Panel();
+        readonly Label lblUpdate = new Label();
+        UpdateInfo pendingUpdate;
+        bool updateChecking;
+
         // top bar
         readonly Label lblTitle = new Label();
         readonly Label lblCount = new Label();
@@ -152,6 +158,8 @@ namespace RdpPanel
                 p.Visible = false;
                 content.Controls.Add(p);
             }
+            BuildUpdateBar();
+            content.Controls.Add(updateBar);   // added last, so it docks above the pages
 
             // order matters for docking: footer bar, top bar, sidebar, then the rest
             Controls.Add(content);
@@ -189,6 +197,7 @@ namespace RdpPanel
                 if (tick % 15 == 0) RefreshSummary();
                 if (tick % 60 == 20) RecordMetrics();
                 if (tick % 30 == 5) CheckDailyReport();
+                if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
                 if (Cfg.DiscordIntervalMin > 0 && Discord.IsValid(Cfg.WebhookUrl) && (DateTime.Now - lastDiscord).TotalMinutes >= Cfg.DiscordIntervalMin)
                 {
                     lastDiscord = DateTime.Now;
@@ -227,6 +236,85 @@ namespace RdpPanel
                 ForeColor = Theme.FgMuted,
                 Margin = new Padding(0, 2, 4, 0)
             };
+        }
+
+        void BuildUpdateBar()
+        {
+            updateBar.Dock = DockStyle.Top;
+            updateBar.Height = 38;
+            updateBar.BackColor = Theme.Accent;
+            updateBar.Visible = false;
+
+            lblUpdate.Dock = DockStyle.Fill;
+            lblUpdate.ForeColor = Color.White;
+            lblUpdate.Font = Theme.UI(10f, FontStyle.Bold);
+            lblUpdate.TextAlign = ContentAlignment.MiddleLeft;
+            lblUpdate.Padding = new Padding(16, 0, 0, 0);
+
+            var btns = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                WrapContents = false,
+                Padding = new Padding(0, 5, 10, 0),
+                BackColor = Theme.Accent
+            };
+            var btnGet = Theme.MakeButton("Download");
+            btnGet.Click += (s, e) => { if (pendingUpdate != null) UI.OpenUrl(pendingUpdate.Url); };
+            var btnSkip = Theme.MakeButton("Skip this version");
+            btnSkip.Click += (s, e) =>
+            {
+                if (pendingUpdate != null) { Cfg.SkippedVersion = pendingUpdate.Version; Cfg.Save(); }
+                updateBar.Visible = false;
+            };
+            var btnLater = Theme.MakeButton("Later");
+            btnLater.Click += (s, e) => updateBar.Visible = false;
+            btns.Controls.Add(btnGet);
+            btns.Controls.Add(btnSkip);
+            btns.Controls.Add(btnLater);
+
+            updateBar.Controls.Add(lblUpdate);
+            updateBar.Controls.Add(btns);
+        }
+
+        async void CheckUpdateAsync()
+        {
+            if (!Cfg.CheckForUpdates || updateChecking) return;
+            updateChecking = true;
+            try
+            {
+                var info = await UpdateChecker.CheckAsync();
+                if (IsDisposed || info == null) return;
+                if (info.Version == Cfg.SkippedVersion) return;
+                bool isNew = pendingUpdate == null || pendingUpdate.Version != info.Version;
+                pendingUpdate = info;
+                lblUpdate.Text = "A new version is available: RDP Panel v" + info.Version + "  (you have v" + AppInfo.Version + ")";
+                if (isNew)
+                {
+                    // pop-up window, unless the panel runs hidden (autostart / background / minimised): then a tray balloon + the banner
+                    bool quiet = autoStartLaunch && (Cfg.StartMinimized || Cfg.BackgroundMode) || inBackground || WindowState == FormWindowState.Minimized || !Visible;
+                    if (quiet)
+                    {
+                        updateBar.Visible = true;
+                        notify.BalloonTipTitle = "RDP Panel update";
+                        notify.BalloonTipText = "Version " + info.Version + " is available.";
+                        notify.ShowBalloonTip(5000);
+                    }
+                    else
+                    {
+                        using (var dlg = new UpdateDialog(info))
+                        {
+                            var r = dlg.ShowDialog(this);
+                            if (r == DialogResult.Yes) UI.OpenUrl(info.Url);
+                            else if (r == DialogResult.Ignore) { Cfg.SkippedVersion = info.Version; Cfg.Save(); }
+                            else updateBar.Visible = true;   // later: the banner stays as a reminder
+                        }
+                    }
+                }
+                else if (!updateBar.Visible) updateBar.Visible = true;
+            }
+            catch { }
+            finally { updateChecking = false; }
         }
 
         void BuildTop()
