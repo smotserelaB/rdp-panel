@@ -329,6 +329,16 @@ namespace RdpPanel
         readonly TextBox txtBotChannel = new TextBox();
         readonly TextBox txtBotAllowed = new TextBox();
         readonly Label lblBotState = new Label();
+        readonly CheckBox chkPause = new CheckBox { Text = "Pause all automatic Discord messages (for maintenance)", AutoSize = true };
+        readonly CheckBox chkQuiet = new CheckBox { Text = "Quiet hours: fewer Discord messages between", AutoSize = true };
+        readonly DateTimePicker dtpQuietFrom = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
+        readonly DateTimePicker dtpQuietTo = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
+        readonly ComboBox cmbQuietMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly NumericUpDown numMaxMsgs = new NumericUpDown { Minimum = 0, Maximum = 500 };
+        readonly Label lblRules = new Label { AutoSize = true };
+        readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        string lastBotState = "";
+        DateTime lastBotChange = DateTime.Now;
         readonly CheckBox chkShot = new CheckBox { Text = "Save a screenshot when a session drops", AutoSize = true };
         readonly CheckBox chkFps = new CheckBox { Text = "Show FPS in the tiles (screen updates per second)", AutoSize = true };
         readonly CheckBox chkReport = new CheckBox { Text = "Send the daily report to Discord every morning", AutoSize = true };
@@ -411,6 +421,22 @@ namespace RdpPanel
             y += 52;
             UI.Lbl(box, "Bot token", 0, y + 4, 200, false);
             UI.Put(box, txtBotToken, 210, y, 320);
+            var btnShow = UI.Btn(box, "Show", 540, y - 2, 80, false);
+            btnShow.Click += (s, e) =>
+            {
+                bool hide = !txtBotToken.UseSystemPasswordChar;
+                txtBotToken.UseSystemPasswordChar = hide;
+                txtHook.UseSystemPasswordChar = hide;
+                btnShow.Text = hide ? "Show" : "Hide";
+            };
+            var btnClear = UI.Btn(box, "Clear…", 630, y - 2, 80, false);
+            btnClear.Click += (s, e) =>
+            {
+                if (MessageBox.Show(main, "Remove the webhook link and the bot token from this page?\r\nPress Save afterwards to really delete them.", "Discord",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                txtHook.Text = "";
+                txtBotToken.Text = "";
+            };
             y += 38;
             UI.Lbl(box, "Channel ID (optional)", 0, y + 4, 200, false);
             UI.Put(box, txtBotChannel, 210, y, 320);
@@ -431,8 +457,39 @@ namespace RdpPanel
             lblBotState.ForeColor = Theme.FgMuted;
             box.Controls.Add(lblBotState);
             var refresh = UI.Btn(box, "Refresh status", 0, y, 160, false);
-            refresh.Click += (s, e) => lblBotState.Text = "Status: " + main.BotState;
+            refresh.Click += (s, e) => UpdateBotStatus();
             y += 60;
+
+            UI.Lbl(box, "Rules for automatic Discord messages", 0, y, 400, false).Font = Theme.UI(10.5f, FontStyle.Bold);
+            y += 28;
+            UI.Lbl(box, "These rules apply to drop messages, warnings and the periodic overview. The daily report, bot commands and test buttons are not affected (the report only by 'Pause').", 0, y, 760, true);
+            y += 28;
+            chkPause.Location = new Point(0, y);
+            chkPause.ForeColor = Theme.Fg;
+            box.Controls.Add(chkPause);
+            y += 36;
+            chkQuiet.Location = new Point(0, y);
+            chkQuiet.ForeColor = Theme.Fg;
+            box.Controls.Add(chkQuiet);
+            UI.Put(box, dtpQuietFrom, 380, y - 2, 80);
+            UI.Lbl(box, "and", 470, y + 2, 40, false);
+            UI.Put(box, dtpQuietTo, 510, y - 2, 80);
+            y += 38;
+            UI.Lbl(box, "During quiet hours", 0, y + 4, 200, false);
+            cmbQuietMode.Items.AddRange(new object[] { "Send no messages", "Only drops and PCs that stop responding" });
+            cmbQuietMode.FlatStyle = FlatStyle.Flat;
+            UI.Put(box, cmbQuietMode, 210, y, 320);
+            y += 40;
+            UI.Lbl(box, "Maximum messages per hour (0 = no limit)", 0, y + 4, 410, false);
+            UI.Put(box, numMaxMsgs, 420, y, 110);
+            y += 28;
+            UI.Lbl(box, "Above the limit the messages wait; you get one short summary when the next one may be sent.", 0, y + 4, 760, true).Font = Theme.UI(8.25f);
+            y += 28;
+            lblRules.Location = new Point(0, y);
+            lblRules.ForeColor = Theme.FgMuted;
+            lblRules.BackColor = Color.Transparent;
+            box.Controls.Add(lblRules);
+            y += 40;
 
             UI.Lbl(box, "Daily report", 0, y, 300, false).Font = Theme.UI(10.5f, FontStyle.Bold);
             y += 28;
@@ -506,6 +563,24 @@ namespace RdpPanel
             save.Click += (s, e) => Save();
             box.Height = y + 70;
             Controls.Add(box);
+
+            statusTimer.Tick += (s, e) => { if (Visible && !IsDisposed) UpdateBotStatus(); };
+            statusTimer.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) statusTimer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        // the bot line with the time of its last change, and what the message rules do right now
+        void UpdateBotStatus()
+        {
+            string st = main.BotState;
+            if (st != lastBotState) { lastBotState = st; lastBotChange = DateTime.Now; }
+            lblBotState.Text = "Status: " + st + "  (since " + lastBotChange.ToString("HH:mm") + ")";
+            lblRules.Text = "Right now: " + main.DiscordRulesState();
         }
 
         static void Row(Control p, string label, Control c, ref int y)
@@ -544,7 +619,16 @@ namespace RdpPanel
             txtBotChannel.Text = c.BotChannelId;
             txtBotAllowed.Text = c.BotAllowedUsers;
             chkBot.Checked = c.BotEnabled;
-            lblBotState.Text = "Status: " + main.BotState;
+            chkPause.Checked = c.DiscordPaused;
+            chkQuiet.Checked = c.QuietHoursOn;
+            TimeSpan qf, qt;
+            if (!TimeSpan.TryParse(c.QuietFrom, CultureInfo.InvariantCulture, out qf)) qf = TimeSpan.Zero;
+            if (!TimeSpan.TryParse(c.QuietTo, CultureInfo.InvariantCulture, out qt)) qt = new TimeSpan(7, 0, 0);
+            dtpQuietFrom.Value = DateTime.Today.Add(qf);
+            dtpQuietTo.Value = DateTime.Today.Add(qt);
+            cmbQuietMode.SelectedIndex = c.QuietMode == 1 ? 1 : 0;
+            numMaxMsgs.Value = Math.Max(numMaxMsgs.Minimum, Math.Min(numMaxMsgs.Maximum, c.MaxMsgsPerHour));
+            UpdateBotStatus();
         }
 
         void Save()
@@ -577,6 +661,12 @@ namespace RdpPanel
             c.DiscordAlerts = chkDiscAlerts.Checked;
             c.DiscordIntervalMin = (int)numDiscMin.Value;
             c.DiscordShotMode = cmbShotMode.SelectedIndex == 1 ? 1 : 0;
+            c.DiscordPaused = chkPause.Checked;
+            c.QuietHoursOn = chkQuiet.Checked;
+            c.QuietFrom = dtpQuietFrom.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
+            c.QuietTo = dtpQuietTo.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
+            c.QuietMode = cmbQuietMode.SelectedIndex == 1 ? 1 : 0;
+            c.MaxMsgsPerHour = (int)numMaxMsgs.Value;
             bool themeChanged = chkLight.Checked != c.LightTheme;
             c.AlertAfterSeconds = (int)numAfter.Value;
             c.CpuWarn = (int)numCpu.Value;

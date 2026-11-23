@@ -1112,7 +1112,7 @@ namespace RdpPanel
         {
             try
             {
-                if (!Cfg.ReportEnabled || reportBusy || DateTime.Now < nextReportTry) return;
+                if (!Cfg.ReportEnabled || Cfg.DiscordPaused || reportBusy || DateTime.Now < nextReportTry) return;
                 TimeSpan at;
                 if (!TimeSpan.TryParse(Cfg.ReportTime, CultureInfo.InvariantCulture, out at)) at = new TimeSpan(8, 0, 0);
                 var now = DateTime.Now;
@@ -1180,6 +1180,79 @@ namespace RdpPanel
             return null;
         }
 
+        // ---------------------------------------------------------------- rules for Discord messages
+
+        readonly List<DateTime> discordSent = new List<DateTime>();
+        int discordHeldBack;
+        DateTime discordHeldSince;
+
+        bool InQuietHours(TimeSpan now)
+        {
+            TimeSpan from, to;
+            if (!TimeSpan.TryParse(Cfg.QuietFrom, CultureInfo.InvariantCulture, out from)) from = TimeSpan.Zero;
+            if (!TimeSpan.TryParse(Cfg.QuietTo, CultureInfo.InvariantCulture, out to)) to = new TimeSpan(7, 0, 0);
+            if (from == to) return false;
+            return from < to ? (now >= from && now < to) : (now >= from || now < to);   // e.g. 22:00 - 07:00 runs over midnight
+        }
+
+        // asks permission for one automatic Discord message: pause, quiet hours and the limit per hour.
+        // critical = a drop or a PC that stops responding (a CPU/RAM warning and the overview are not critical).
+        // The daily report, the bot commands and the test buttons do not use this.
+        internal bool DiscordAllowed(bool critical)
+        {
+            if (Cfg.DiscordPaused) return false;
+            if (Cfg.QuietHoursOn && InQuietHours(DateTime.Now.TimeOfDay) && !(critical && Cfg.QuietMode == 1)) return false;
+            if (Cfg.MaxMsgsPerHour > 0)
+            {
+                var now = DateTime.Now;
+                discordSent.RemoveAll(x => (now - x).TotalMinutes >= 60);
+                if (discordSent.Count >= Cfg.MaxMsgsPerHour)
+                {
+                    if (discordHeldBack == 0) discordHeldSince = now;
+                    discordHeldBack++;
+                    return false;
+                }
+                discordSent.Add(now);
+                if (discordHeldBack > 0)
+                {
+                    int n = discordHeldBack;
+                    discordHeldBack = 0;
+                    SendDiscordNote("⏸ " + n + " message" + (n == 1 ? " was" : "s were") + " held back since " + discordHeldSince.ToString("HH:mm")
+                        + " (limit: " + Cfg.MaxMsgsPerHour + " per hour). See the log in the panel for everything that happened.");
+                }
+            }
+            return true;
+        }
+
+        // a short plain message that does not count for the limit
+        async void SendDiscordNote(string text)
+        {
+            try
+            {
+                string err;
+                if (Discord.IsValid(Cfg.WebhookUrl)) err = await Discord.SendAsync(Cfg.WebhookUrl, text, null);
+                else if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId)) err = await bot.PostChannelMessage(text);
+                else return;
+                if (err != null) LogService.Write("", "Discord", "sending failed: " + err, 0);
+            }
+            catch (Exception ex) { ErrorLog.Write("discord note", ex); }
+        }
+
+        // one line for the Settings page: what the rules do right now
+        internal string DiscordRulesState()
+        {
+            if (Cfg.DiscordPaused) return "All automatic Discord messages are paused.";
+            if (Cfg.QuietHoursOn && InQuietHours(DateTime.Now.TimeOfDay))
+                return "Quiet hours until " + Cfg.QuietTo + (Cfg.QuietMode == 1 ? " (only drops and PCs that stop responding are sent)." : " (no messages).");
+            if (Cfg.MaxMsgsPerHour > 0)
+            {
+                var now = DateTime.Now;
+                int used = discordSent.Count(x => (now - x).TotalMinutes < 60);
+                return "Messages in the last hour: " + used + " of " + Cfg.MaxMsgsPerHour + (discordHeldBack > 0 ? "  –  " + discordHeldBack + " held back." : ".");
+            }
+            return "Discord messages are on.";
+        }
+
         // ---------------------------------------------------------------- notifications and dashboard
 
         void OnAlert(SessionTile t, string msg)
@@ -1188,10 +1261,17 @@ namespace RdpPanel
             warnAt = DateTime.Now;
             RefreshSummary();
             if (DateTime.Now < MuteUntil) return;   // muted with /quiet
-            if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId))
-                bot.PostAlert(t.Config.Name, msg);   // notification with buttons in the bot channel
-            else if (Cfg.DiscordAlerts && Discord.IsValid(Cfg.WebhookUrl))
-                Discord.Post(Cfg.WebhookUrl, t.Config.Name, "⚠ " + msg, null);
+            // a CPU/RAM warning is less important than a session that is gone or a PC that does not respond
+            bool critical = msg.IndexOf("CPU ", StringComparison.Ordinal) < 0 || msg.IndexOf("RAM ", StringComparison.Ordinal) < 0;
+            bool sendToDiscord = (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId))
+                || (Cfg.DiscordAlerts && Discord.IsValid(Cfg.WebhookUrl));
+            if (sendToDiscord && DiscordAllowed(critical))
+            {
+                if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId))
+                    bot.PostAlert(t.Config.Name, msg);   // notification with buttons in the bot channel
+                else
+                    Discord.Post(Cfg.WebhookUrl, t.Config.Name, "⚠ " + msg, null);
+            }
             if (!Cfg.AlertsEnabled) return;
             try { notify.ShowBalloonTip(8000, "RDP Panel", msg, ToolTipIcon.Warning); } catch { }
             if (Cfg.AlertSound) System.Media.SystemSounds.Exclamation.Play();
@@ -1299,7 +1379,7 @@ namespace RdpPanel
                 string path = SavePanelFile(shot.Item1);
                 if (path != null) LogService.Write(t.Config.Name, "Screenshot", path, 0);
             }
-            if (!Cfg.DiscordOnDrop || !Discord.IsValid(Cfg.WebhookUrl)) return;
+            if (!Cfg.DiscordOnDrop || !Discord.IsValid(Cfg.WebhookUrl) || !DiscordAllowed(true)) return;
 
             var files = new List<KeyValuePair<string, byte[]>>();
             string age = "";
@@ -1318,6 +1398,7 @@ namespace RdpPanel
         // a message with the overview (whole panel or one image per session)
         void SendDiscordOverview()
         {
+            if (!DiscordAllowed(false)) return;
             var files = new List<KeyValuePair<string, byte[]>>();
             string age = "";
             if (Cfg.DiscordShotMode == 0)

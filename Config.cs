@@ -110,6 +110,14 @@ namespace RdpPanel
         public int DiscordIntervalMin;   // 0 = off
         public int DiscordShotMode;      // 0 = whole panel, 1 = per session
 
+        // rules for all automatic Discord messages
+        public bool DiscordPaused;       // pause everything (maintenance)
+        public bool QuietHoursOn;
+        public string QuietFrom = "00:00";
+        public string QuietTo = "07:00";
+        public int QuietMode;            // 0 = no messages in the quiet hours, 1 = only drops and PCs that stop responding
+        public int MaxMsgsPerHour;       // 0 = no limit; above it the messages are held back and summarised
+
         [ScriptIgnore]
         public string WebhookUrl
         {
