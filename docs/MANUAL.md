@@ -1,16 +1,16 @@
 RDP Panel – Manual
-What is it?
+1. What is it?
 RDP Panel opens several Remote Desktop (RDP) sessions in one window. Each session is a tile that shows the live screen, whether it is connected, how long, CPU/RAM of that PC and the ping. If a session drops, the panel reconnects by itself (waiting a bit longer after every failed try, and giving up after several attempts so a wrong password cannot lock your account).
-Installing
+2. Installing
 Easiest: download `RdpPanel-Setup-x.y.z.exe` from the Releases page and run it.
 Portable: download the zip, unzip, run `RdpPanel.exe`.
 Windows SmartScreen may warn because the program is not code-signed. Click "More info", then "Run anyway". Check `SHA256SUMS.txt` if you want to be sure the file is intact.
-First start
+3. First start
 Click + Session (or use Settings on a tile with the ✎ button).
 Fill in host (`192.168....` or `192.168.....`), username and password. Passwords are stored encrypted with Windows DPAPI, so only your Windows account can read them.
 Press Connect. "Connect automatically at startup" is on by default.
 On the PC you connect to, Remote Desktop must be turned on. If you want several sessions on one PC at the same time you need RDPWrap/RDPWrapKit; that is installed separately and is not part of this program.
-The window
+4. The window
 Sidebar: Overview, Monitoring (big charts), Log, PC management, Profiles, Settings.
 Tile header: drag it onto another tile to swap places. The ⋮ menu (or right-click) has: large view, connect/disconnect, edit link, copy link, screenshot, Wake-on-LAN, restart/shut down PC, settings.
 Tile colors: green = good, orange = dropped, grey = offline.
@@ -23,14 +23,14 @@ Background mode (Settings): the minimise button makes the panel invisible and cl
 When another window covers the panel, the pictures are taken from the window itself (with the screen copy as the normal way when nothing covers it).
 Test screenshot (Settings or tray menu) shows which method works on your PC and saves test pictures in the screenshots folder.
 If the panel is completely closed there are no sessions, so no pictures and no bot.
-PC management
+5. PC management
 Wake-on-LAN: needs the MAC address (filled in automatically after the first connection) and WoL turned on in the PC's BIOS/network card.
 Restart / shut down: uses WMI. Run `wmi-setup.bat` as administrator on the target PC once, then enter an administrator account of that PC in the session settings ("Administrator").
 Search network: scans your /24 network for PCs with RDP (port 3389) open and lets you add them.
 Import users: paste lines like `name password` and the panel creates a session per line.
-Notifications
+6. Notifications
 Settings → set after how many seconds a missing session triggers a notification, and CPU/RAM/free memory limits. Notifications go to Windows, with sound, and optionally to Discord. Use a Discord webhook (channel settings → Integrations) for simple messages and screenshots.
-The Discord bot
+7. The Discord bot
 Setup is in the README. What the bot adds on top of the webhook:
 Slash commands (`/help` lists all of them with examples).
 Buttons under screenshots and notifications.
@@ -45,9 +45,9 @@ Settings → Updates. The panel checks GitHub at startup and every 6 hours (swit
 Settings or Help → Create diagnostic file. One zip with the log of 7 days, measurements of 3 days, system information and your settings, without passwords, usernames, webhook, bot token, links or screenshots. Open it to check before you send it.
 7d. Help and tutorial
 The Help page (F1) contains this manual. A short tour starts by itself the first time you run the panel after installing, and can be started again from the Help page.
-Settings and files
+8. Settings and files
 Stored in `%APPDATA%\RdpPanel\`: `config.json`, `log.csv`, `metrics.csv`, `errors.log`, `screenshots\`. Passwords, webhook and bot token are encrypted per Windows user, so a copied `config.json` does not work on another account or PC. Never upload `config.json` to GitHub (the `.gitignore` already blocks it).
-Troubleshooting
+9. Troubleshooting
 Problem	Check
 Tile stays "Offline"	PC on? Remote Desktop enabled? Port 3389 open in the firewall?
 "Cannot read CPU/RAM"	Run `wmi-setup.bat` as administrator on that PC; enter an administrator account in the session settings.
@@ -55,7 +55,7 @@ Bot does not respond	Token correct? Bot invited with `applications.commands`? Ch
 Build fails with missing `MSTSCLib`	Run `setup.bat` (or let the GitHub workflow build it).
 `– FPS`	Hover over it for the reason. Minimised panel: turn on background mode in Settings.
 Old or black screenshot	Settings → Test screenshot.
-For developers: how the code is organized
+10. For developers: how the code is organized
 File	Purpose
 `Program.cs`	Entry point, loads config and theme
 `MainForm.cs`	Window: sidebar, pages, tile layout, notifications, Discord, screenshots
@@ -74,6 +74,10 @@ File	Purpose
 `Config.cs`	Settings and sessions, encrypted secrets
 `Controls.cs`, `Theme.cs`, `Dialogs.cs`	UI building blocks, colors, small dialogs
 `AppInfo.cs`	Version number (single place)
+
 After an update
 The first time you start a new version, a "What's new" window shows what changed (not on a fresh install). If the Discord bot has a channel, it also posts "RDP Panel updated to vX" there once. /ping in Discord tells you when a newer version is available.
 The Daily summary shows only the sessions on your screens (the active profile). "+N hidden by profile" at the bottom counts the others. The daily report in Discord still includes them, under "Hidden by profile".
+
+Discord message rules (Settings)
+Under the Discord bot you can pause all automatic Discord messages, set quiet hours (send nothing, or only drops and PCs that stop responding) and set a maximum number of messages per hour. Above the limit messages wait and you get one summary. The daily report, bot commands and test buttons are not limited (the daily report is only stopped by Pause). Warnings on screen, sound and the log are not affected.
