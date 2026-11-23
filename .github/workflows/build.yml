@@ -26,6 +26,12 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match AppInfo.Version $v"
           }
 
+      - name: Check that the release notes exist
+        shell: pwsh
+        run: |
+          $f = "docs/release-notes/${{ steps.ver.outputs.version }}.md"
+          if (-not (Test-Path $f)) { throw "Release notes missing: $f (write them before you tag this version)" }
+
       - name: Create the RDP interop DLLs (aximp)
         shell: pwsh
         run: |
@@ -76,4 +82,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: docs/release-notes/${{ steps.ver.outputs.version }}.md
