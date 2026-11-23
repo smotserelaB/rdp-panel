@@ -1,0 +1,18 @@
+# build output
+bin/
+obj/
+.vs/
+*.user
+*.suo
+# generated from the Windows RDP component (made by setup.bat / the workflow)
+lib/
+# never publish personal settings or logs
+config.json
+log.csv
+metrics.csv
+errors.log
+screenshots/
+# build artifacts
+dist/
+*.zip
+FodyWeavers.xsd
