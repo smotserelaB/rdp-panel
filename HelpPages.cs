@@ -75,12 +75,19 @@ namespace RdpPanel
                 .B("**Bot:** slash commands and buttons (`/status`, `/screen`, `/live`, `/restart-pc` …). Create it at **discord.com/developers**, add the token in Settings, tick **Discord bot on** and Save. Type **/help** in Discord for all commands with examples.")
                 .N("Never share your webhook link or bot token. Anyone who has it can post as your panel or control it."),
 
+            new HelpTopic { Title = "Updates" }
+                .P("The panel looks on GitHub for a newer version at startup and every 6 hours. Press **Settings → Updates → Check now** to look right away; it also works when the automatic check is off.")
+                .B("With the **installer version**, **Update now** downloads the new installer, checks it against its SHA256 checksum, closes the panel, installs the update and starts the panel again. Your sessions and settings are kept.")
+                .B("If the checksum does not match, nothing is installed. A loose RdpPanel.exe from the zip opens the download page instead.")
+                .B("The window only appears when the installer is really online. While it is still being built, the panel waits and tries again after 10 minutes."),
+
             new HelpTopic { Title = "Daily report" }
                 .P("Every morning the panel posts one message in Discord with, **per session**: the **uptime** of the previous day (time and percentage), the number of **drops**, and the average **CPU, RAM and FPS**.")
                 .B("Switch it on in **Settings → Daily report** and choose the time (default 08:00). It is sent to the Discord webhook; if there is none, to the bot channel.")
                 .B("**Send report now** sends a report for today so far, so you can see what it looks like right away.")
                 .B("Uptime is the time a session was connected, as a percentage of 24 hours. If the panel itself was closed or the PC was off, that time counts as not connected.")
-                .B("A **drop** is a connection that was lost without you disconnecting it. Failed reconnect tries are listed separately.")
+                .B("A **drop** is a connection that was lost without you disconnecting it. The report shows when the first drops happened and the longest outage. Failed reconnect tries are listed separately.")
+                .B("Sessions that need attention are listed first, with a one-line summary on top and a comparison with the day before. A high CPU or RAM peak is shown next to the average.")
                 .B("If the PC was off at the chosen time, the report is sent as soon as the panel starts that day. Nothing is sent when there is no data yet.")
                 .P("The measurements for the averages are saved once a minute in **metrics.csv** and kept for 14 days."),
 

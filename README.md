@@ -1,4 +1,4 @@
-# RDP Panel v1.0
+# RDP Panel
 
 One window for all your RDP sessions: sidebar, tiles with live screen and status, dashboard at the bottom, and an optional Discord bot to control everything from your phone.
 
@@ -19,12 +19,20 @@ Needs the .NET SDK, and internet the first time (the Costura.Fody package builds
 
 **Manual:** run `setup.bat` once, then press F5 in Visual Studio or run `dotnet build -c Release`.
 
-**GitHub:** push a tag such as `v1.0.0`; the workflow builds the exe, zip and installer and attaches them to a release.
+**GitHub:** push a tag such as `v1.1.0`; the workflow builds the exe, zip and installer and attaches them to a release.
 
 The program is not digitally signed, so Windows SmartScreen or a virus scanner may warn. Needs .NET Framework 4.8 (already in Windows 10/11).
 
 ## Updating
-Copy ALL `.cs` files from the new version over your old ones and leave the `lib` folder alone.
+- **Installer version:** the panel announces a new version; click **Update now** (it downloads, checks the SHA256 checksum, installs and restarts). Your sessions and settings are kept.
+- **Portable exe:** download the new `RdpPanel.exe` and replace the old one.
+- After an update a **What's new** window shows once. The text comes from `docs/release-notes/<version>.md`, which is also used as the text of the GitHub release.
+- **Building from source:** copy ALL `.cs` files from the new version over your old ones and leave the `lib` folder alone.
+
+### Releasing a new version (for the maintainer)
+1. Raise the version in `AppInfo.cs` and `RdpPanel.csproj`.
+2. Write `docs/release-notes/<version>.md` in plain language (the workflow stops if it is missing).
+3. Push a tag such as `v1.1.1`.
 
 ## Features
 - Overview grid (adjustable columns), group per PC, search, drag to rearrange.
@@ -32,10 +40,11 @@ Copy ALL `.cs` files from the new version over your old ones and leave the `lib`
 - Notifications for drops, unreachable PCs and high CPU/RAM (Windows notification, sound, optional Discord).
 - Screenshot of the whole panel; screenshot on a drop; Discord webhook for drops, manually and every N minutes.
 - Discord bot with slash commands and buttons (see below).
-- Log with explanations in plain language, daily summary.
+- Log with explanations in plain language, daily summary (only the sessions on your screens; sessions hidden by the active profile are counted on a separate line).
 - **FPS** per session (how often the picture changes per second, max. about 10), shown in the tile header; hover for the reason when there is no number.
 - **Background mode**: the minimise button hides the panel but keeps it working, so screenshots (webhook and bot) and FPS also work when it is not on screen. Tray icon to open it again. **Test screenshot** button in Settings and the tray menu.
-- **Daily report** in Discord every morning: uptime, number of drops and average CPU/RAM/FPS per session.
+- **Daily report** in Discord every morning (sessions hidden by the active profile are reported under their own heading): summary, then per session uptime (with comparison to the day before), drops with times and longest outage, average and peak CPU/RAM, FPS.
+- **Updates from inside the app**: a new version is announced (only when the installer is online), and with the installer version "Update now" downloads it, checks the SHA256 checksum, installs it and restarts the panel. "Check now" in Settings.
 - **Diagnostic file**: one button makes a zip with the log and system information, without passwords or tokens.
 - **Help page and tutorial** inside the app, and a **Credits** page.
 - PC management: Wake-on-LAN, restart/shut down, network scan, import users.
@@ -65,7 +74,7 @@ Copy ALL `.cs` files from the new version over your old ones and leave the `lib`
 | `/link` | Change the Roblox link |
 | `/large` | Show a session large on the PC |
 | `/log` `/summary` | Today's events and connected time |
-| `/ping` | Bot alive, response time, version |
+| `/ping` | Bot alive, response time, version, and whether an update is available |
 | `/quiet [minutes]` | Mute notifications |
 
 ## Files

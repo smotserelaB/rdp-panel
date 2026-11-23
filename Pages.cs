@@ -334,6 +334,8 @@ namespace RdpPanel
         readonly CheckBox chkReport = new CheckBox { Text = "Send the daily report to Discord every morning", AutoSize = true };
         readonly DateTimePicker dtpReport = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
         readonly Label lblReportState = new Label { AutoSize = true };
+        readonly CheckBox chkUpdates = new CheckBox { Text = "Check for updates (at startup and every 6 hours)", AutoSize = true };
+        readonly Label lblUpdateState = new Label { AutoSize = true };
 
         public SettingsPage(MainForm main)
         {
@@ -343,7 +345,7 @@ namespace RdpPanel
             Padding = new Padding(16);
             AutoScroll = true;
 
-            var box = new Panel { Dock = DockStyle.Top, Height = 1230, BackColor = Theme.Bg };
+            var box = new Panel { Dock = DockStyle.Top, Height = 1400, BackColor = Theme.Bg };
             int y = 8;
             Row(box, "Notify when a session has been gone for more than … seconds", numAfter, ref y);
             Row(box, "Warn at CPU usage from … %", numCpu, ref y);
@@ -466,6 +468,32 @@ namespace RdpPanel
             UI.Lbl(box, "Press Save first when you changed the webhook. \"Send report now\" shows today so far, the real report covers the whole previous day.", 0, y, 760, true).Font = Theme.UI(8.25f);
             y += 40;
 
+            UI.Lbl(box, "Updates", 0, y, 300, false).Font = Theme.UI(10.5f, FontStyle.Bold);
+            y += 28;
+            chkUpdates.Location = new Point(0, y);
+            chkUpdates.ForeColor = Theme.Fg;
+            box.Controls.Add(chkUpdates);
+            y += 36;
+            var checkNow = UI.Btn(box, "Check now", 0, y, 160, false);
+            lblUpdateState.Location = new Point(172, y + 6);
+            lblUpdateState.ForeColor = Theme.FgMuted;
+            lblUpdateState.BackColor = Color.Transparent;
+            box.Controls.Add(lblUpdateState);
+            checkNow.Click += async (s, e) =>
+            {
+                checkNow.Enabled = false;
+                lblUpdateState.Text = "Checking…";
+                string res;
+                try { res = await main.CheckUpdateNow(); }
+                catch (Exception ex) { res = "Could not check for updates: " + ex.Message; }
+                if (IsDisposed) return;
+                checkNow.Enabled = true;
+                lblUpdateState.Text = res;
+            };
+            y += 40;
+            UI.Lbl(box, "You have v" + AppInfo.Version + ". \"Check now\" works even when the automatic check is off. With the installer version the panel can download and install the update itself.", 0, y, 760, true).Font = Theme.UI(8.25f);
+            y += 40;
+
             UI.Lbl(box, "Diagnostics", 0, y, 300, false).Font = Theme.UI(10.5f, FontStyle.Bold);
             y += 28;
             UI.Lbl(box, "Something wrong? One click makes a zip with the log and system information, without passwords, tokens or links.", 0, y, 760, true);
@@ -502,6 +530,7 @@ namespace RdpPanel
             chkShot.Checked = c.ScreenshotOnDrop;
             chkFps.Checked = c.ShowFps;
             chkReport.Checked = c.ReportEnabled;
+            chkUpdates.Checked = c.CheckForUpdates;
             TimeSpan at;
             if (!TimeSpan.TryParse(c.ReportTime, CultureInfo.InvariantCulture, out at)) at = new TimeSpan(8, 0, 0);
             dtpReport.Value = DateTime.Today.Add(at);
@@ -560,6 +589,7 @@ namespace RdpPanel
             c.ScreenshotOnDrop = chkShot.Checked;
             c.ShowFps = chkFps.Checked;
             c.ReportEnabled = chkReport.Checked;
+            c.CheckForUpdates = chkUpdates.Checked;
             c.ReportTime = dtpReport.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
             c.StartWithWindows = chkStartup.Checked;
             bool startupOk = StartupHelper.Set(chkStartup.Checked);

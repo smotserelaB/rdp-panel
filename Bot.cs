@@ -441,7 +441,9 @@ namespace RdpPanel
                         string lat = ms < 0 || ms > 10000 ? "unknown (this PC's clock is out of sync with Discord)" : "about " + ms + " ms";
                         int online = infos.Count(x => x.Online);
                         bool muted = Ui(() => main.MuteUntil) > DateTime.Now;
+                        string upd = Ui(() => main.UpdateAvailableText);
                         await Edit(token, "🏓 Pong! The bot is running.\n⏱ Response time: " + lat + "\n📦 Panel v" + AppInfo.Version
+                            + (upd != null ? "  –  ⬆ update available: " + upd : "")
                             + "\n🖥 " + online + " of " + infos.Count + " sessions connected\n🔔 Notifications: " + (muted ? "muted" : "on"), null, null);
                         break;
                     }

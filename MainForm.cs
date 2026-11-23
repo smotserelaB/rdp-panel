@@ -49,7 +49,9 @@ namespace RdpPanel
         readonly Panel updateBar = new Panel();
         readonly Label lblUpdate = new Label();
         UpdateInfo pendingUpdate;
+        string updatedFromVersion;   // set at the first start after an update; the bot channel is told once the bot is connected
         bool updateChecking;
+        DateTime updateRetryAt = DateTime.MinValue;   // while a new release is still being built (or the check failed): try again then
 
         // top bar
         readonly Label lblTitle = new Label();
@@ -197,7 +199,9 @@ namespace RdpPanel
                 if (tick % 15 == 0) RefreshSummary();
                 if (tick % 60 == 20) RecordMetrics();
                 if (tick % 30 == 5) CheckDailyReport();
+                if (tick % 30 == 12) SendUpdatedMessage();
                 if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
+                if (updateRetryAt != DateTime.MinValue && DateTime.Now >= updateRetryAt) { updateRetryAt = DateTime.MinValue; CheckUpdateAsync(); }
                 if (Cfg.DiscordIntervalMin > 0 && Discord.IsValid(Cfg.WebhookUrl) && (DateTime.Now - lastDiscord).TotalMinutes >= Cfg.DiscordIntervalMin)
                 {
                     lastDiscord = DateTime.Now;
@@ -259,8 +263,8 @@ namespace RdpPanel
                 Padding = new Padding(0, 5, 10, 0),
                 BackColor = Theme.Accent
             };
-            var btnGet = Theme.MakeButton("Download");
-            btnGet.Click += (s, e) => { if (pendingUpdate != null) UI.OpenUrl(pendingUpdate.Url); };
+            var btnGet = Theme.MakeButton("Update now");
+            btnGet.Click += (s, e) => { if (pendingUpdate != null) ShowUpdateDialog(pendingUpdate); };
             var btnSkip = Theme.MakeButton("Skip this version");
             btnSkip.Click += (s, e) =>
             {
@@ -277,44 +281,101 @@ namespace RdpPanel
             updateBar.Controls.Add(btns);
         }
 
+        // automatic check (10 s after start, every 6 hours, and while a new release is still being built)
         async void CheckUpdateAsync()
         {
             if (!Cfg.CheckForUpdates || updateChecking) return;
             updateChecking = true;
             try
             {
-                var info = await UpdateChecker.CheckAsync();
-                if (IsDisposed || info == null) return;
-                if (info.Version == Cfg.SkippedVersion) return;
-                bool isNew = pendingUpdate == null || pendingUpdate.Version != info.Version;
-                pendingUpdate = info;
-                lblUpdate.Text = "A new version is available: RDP Panel v" + info.Version + "  (you have v" + AppInfo.Version + ")";
-                if (isNew)
-                {
-                    // pop-up window, unless the panel runs hidden (autostart / background / minimised): then a tray balloon + the banner
-                    bool quiet = autoStartLaunch && (Cfg.StartMinimized || Cfg.BackgroundMode) || inBackground || WindowState == FormWindowState.Minimized || !Visible;
-                    if (quiet)
-                    {
-                        updateBar.Visible = true;
-                        notify.BalloonTipTitle = "RDP Panel update";
-                        notify.BalloonTipText = "Version " + info.Version + " is available.";
-                        notify.ShowBalloonTip(5000);
-                    }
-                    else
-                    {
-                        using (var dlg = new UpdateDialog(info))
-                        {
-                            var r = dlg.ShowDialog(this);
-                            if (r == DialogResult.Yes) UI.OpenUrl(info.Url);
-                            else if (r == DialogResult.Ignore) { Cfg.SkippedVersion = info.Version; Cfg.Save(); }
-                            else updateBar.Visible = true;   // later: the banner stays as a reminder
-                        }
-                    }
-                }
-                else if (!updateBar.Visible) updateBar.Visible = true;
+                var r = await UpdateChecker.CheckAsync();
+                if (IsDisposed) return;
+                if (r.Status == CheckStatus.Building) { updateRetryAt = DateTime.Now.AddMinutes(10); return; }   // installer not online yet: no pop-up
+                if (r.Status == CheckStatus.Error) { updateRetryAt = DateTime.Now.AddMinutes(30); return; }       // e.g. no internet at startup
+                if (r.Status != CheckStatus.Available) return;
+                if (r.Info.Version == Cfg.SkippedVersion) return;
+                ApplyAvailable(r.Info, false);
             }
             catch { }
             finally { updateChecking = false; }
+        }
+
+        // the "Check now" button in Settings: ignores the on/off switch and "skip this version". Returns the text for next to the button.
+        internal async Task<string> CheckUpdateNow()
+        {
+            if (updateChecking) return "A check is already running.";
+            updateChecking = true;
+            try
+            {
+                var r = await UpdateChecker.CheckAsync();
+                if (IsDisposed) return "";
+                switch (r.Status)
+                {
+                    case CheckStatus.UpToDate:
+                        return "You're up to date (v" + AppInfo.Version + ").";
+                    case CheckStatus.Building:
+                        return "Version " + r.Info.Version + " is being built right now. Try again in a few minutes.";
+                    case CheckStatus.Error:
+                        return "Could not check for updates: " + r.Message;
+                    default:
+                        ApplyAvailable(r.Info, true);
+                        return "Version " + r.Info.Version + " is available.";
+                }
+            }
+            catch (Exception ex) { return "Could not check for updates: " + ex.Message; }
+            finally { updateChecking = false; }
+        }
+
+        void ApplyAvailable(UpdateInfo info, bool manual)
+        {
+            bool isNew = manual || pendingUpdate == null || pendingUpdate.Version != info.Version || pendingUpdate.FilesReady != info.FilesReady;
+            pendingUpdate = info;
+            lblUpdate.Text = "A new version is available: RDP Panel v" + info.Version + "  (you have v" + AppInfo.Version + ")";
+            if (!isNew)
+            {
+                if (!updateBar.Visible) updateBar.Visible = true;
+                return;
+            }
+            // pop-up window, unless the panel runs hidden (autostart / background / minimised): then a tray balloon + the banner
+            bool quiet = !manual && (autoStartLaunch && (Cfg.StartMinimized || Cfg.BackgroundMode) || inBackground || WindowState == FormWindowState.Minimized || !Visible);
+            if (quiet)
+            {
+                updateBar.Visible = true;
+                notify.BalloonTipTitle = "RDP Panel update";
+                notify.BalloonTipText = "Version " + info.Version + " is available.";
+                notify.ShowBalloonTip(5000);
+            }
+            else ShowUpdateDialog(info);
+        }
+
+        // the pop-up. "Update now" downloads and checks the installer inside the pop-up; then we start it and close the panel,
+        // the installer replaces the exe and starts the panel again.
+        void ShowUpdateDialog(UpdateInfo info)
+        {
+            using (var dlg = new UpdateDialog(info))
+            {
+                var r = dlg.ShowDialog(this);
+                if (r == DialogResult.Yes)
+                {
+                    if (!string.IsNullOrEmpty(dlg.InstallerPath))
+                    {
+                        string err = UpdateInstaller.Launch(dlg.InstallerPath);
+                        if (err == null)
+                        {
+                            LogService.Write("", "Update", "installing v" + info.Version, 0);
+                            updateBar.Visible = false;
+                            Close();
+                            return;
+                        }
+                        MessageBox.Show(this, "The installer could not be started:\r\n" + err + "\r\n\r\nThe download page opens instead.", "RDP Panel update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        UI.OpenUrl(info.Url);
+                    }
+                    else UI.OpenUrl(string.IsNullOrEmpty(info.SetupUrl) ? info.Url : info.SetupUrl);
+                    updateBar.Visible = true;
+                }
+                else if (r == DialogResult.Ignore) { Cfg.SkippedVersion = info.Version; Cfg.Save(); updateBar.Visible = false; }
+                else updateBar.Visible = true;   // later: the banner stays as a reminder
+            }
         }
 
         void BuildTop()
@@ -915,6 +976,7 @@ namespace RdpPanel
             RefreshProfileCombo();
             UpdateProfileCard();
             Cfg.Save();
+            RefreshSummary();
             if (page == 0) ArrangeTiles();
             if (page == 4) pgProf.RefreshData();
         }
@@ -1101,8 +1163,10 @@ namespace RdpPanel
                 range = "00:00 – 24:00";
             }
 
-            var live = Tiles.Select(t => new DailyReport.Live { Name = t.Config.Name, Online = t.Online, Seconds = t.ConnectedSeconds, FpsReason = t.FpsReason }).ToList();
-            var parts = await Task.Run(() => DailyReport.Build(from, to, title, range, live));
+            var live = Tiles.Select(t => new DailyReport.Live { Name = t.Config.Name, Online = t.Online, Seconds = t.ConnectedSeconds, FpsReason = t.FpsReason, Hidden = hidden.Contains(t) }).ToList();
+            string updLine = pendingUpdate != null && pendingUpdate.Version != Cfg.SkippedVersion
+                ? "Update available: v" + pendingUpdate.Version + " (you have v" + AppInfo.Version + ")" : null;
+            var parts = await Task.Run(() => DailyReport.Build(from, to, title, range, live, updLine));
             if (parts == null) return DailyReport.NoData;
 
             foreach (var part in parts)
@@ -1295,7 +1359,7 @@ namespace RdpPanel
 
         void UpdateTop()
         {
-            int on = Tiles.Count(t => t.Online);
+            int on = Tiles.Count(t => t.Online && !hidden.Contains(t));
             lblCount.Text = on + " / " + Tiles.Count + " connected ●";
             lblCount.ForeColor = Tiles.Count > 0 && on == Tiles.Count ? Theme.Good : on > 0 ? Theme.Warn : Theme.FgMuted;
 
@@ -1312,7 +1376,7 @@ namespace RdpPanel
 
         void UpdateFooter()
         {
-            int on = Tiles.Count(t => t.Online);
+            int on = Tiles.Count(t => t.Online && !hidden.Contains(t));
             lblFootL.Text = "RDP Panel v" + AppInfo.Version + "   |   " + on + " sessions active   |   Total connected time today: " + UI.Dur(totalToday);
             if (lblWarn.Text.Length > 0 && (DateTime.Now - warnAt).TotalMinutes > 10) lblWarn.Text = "";
         }
@@ -1363,8 +1427,11 @@ namespace RdpPanel
             int total = 0;
             lvSum.BeginUpdate();
             lvSum.Items.Clear();
+            int hiddenCount = 0;
             foreach (var t in Tiles)
             {
+                // only sessions that are on the screens (active profile); the rest is counted below the list
+                if (hidden.Contains(t)) { hiddenCount++; continue; }
                 int secs = te.Where(e => e.Session == t.Config.Name && e.Event == "Disconnected").Sum(e => e.Seconds) + t.ConnectedSeconds;
                 total += secs;
                 var it = new ListViewItem(t.Config.Name) { UseItemStyleForSubItems = false };
@@ -1373,6 +1440,14 @@ namespace RdpPanel
                 var sub = it.SubItems.Add(st);
                 sub.ForeColor = st == "Good" ? Theme.Good : st == "Dropped" ? Theme.Warn : Theme.FgMuted;
                 lvSum.Items.Add(it);
+            }
+            if (hiddenCount > 0)
+            {
+                var hi = new ListViewItem("+" + hiddenCount + " hidden by profile" + (string.IsNullOrEmpty(Cfg.ActiveProfile) ? "" : " '" + Cfg.ActiveProfile + "'")) { UseItemStyleForSubItems = false };
+                hi.ForeColor = Theme.FgMuted;
+                hi.SubItems.Add("");
+                hi.SubItems.Add("");
+                lvSum.Items.Add(hi);
             }
             lvSum.EndUpdate();
             totalToday = total;
@@ -1560,12 +1635,16 @@ namespace RdpPanel
             RefreshSummary();
             ApplyBotSettings();
             var pruneTask = Task.Run(() => MetricsService.Prune());
+            bool freshInstall = !Cfg.TutorialDone;   // no tutorial yet = the very first start of the app
             if (!Cfg.TutorialDone && !autoStartLaunch)
             {
                 Cfg.TutorialDone = true;   // only once
                 Cfg.Save();
                 ShowTutorial();
             }
+            if (!freshInstall && Cfg.UpdateMsgSentFor != AppInfo.Version && ReleaseNotes.IsNewer(AppInfo.Version, Cfg.LastSeenVersion))
+                updatedFromVersion = Cfg.LastSeenVersion ?? "";
+            ShowWhatsNewIfUpdated(freshInstall);
             // after Windows starts, give the network a moment
             if (autoStartLaunch) await Task.Delay(8000);
             // connect staggered, otherwise you get a CPU spike at startup
@@ -1573,6 +1652,68 @@ namespace RdpPanel
             {
                 if (t.Config.AutoConnect) { t.Connect(); await Task.Delay(1500); }
             }
+        }
+
+        // text for /ping and the like: a newer version that the user has not skipped, or null
+        internal string UpdateAvailableText
+        {
+            get
+            {
+                var u = pendingUpdate;
+                if (u == null || u.Version == Cfg.SkippedVersion) return null;
+                return "v" + u.Version + (u.FilesReady ? "" : " (still being built)");
+            }
+        }
+
+        // tells the bot channel once that the panel was updated (waits until the bot is connected)
+        async void SendUpdatedMessage()
+        {
+            if (updatedFromVersion == null) return;
+            try
+            {
+                if (!Cfg.BotEnabled || string.IsNullOrWhiteSpace(Cfg.BotChannelId))
+                {
+                    updatedFromVersion = null;   // no bot channel: nothing to tell
+                    Cfg.UpdateMsgSentFor = AppInfo.Version;
+                    Cfg.Save();
+                    return;
+                }
+                if (bot == null || !bot.Running) return;   // try again at the next tick
+                string from = updatedFromVersion;
+                updatedFromVersion = null;
+                int on = Tiles.Count(t => t.Online);
+                string msg = "🔄 **RDP Panel updated to v" + AppInfo.Version + "**" + (from.Length > 0 ? " (from v" + from + ")" : "")
+                    + "\n🖥 " + on + " of " + Tiles.Count + " sessions connected right now";
+                string err = await bot.PostChannelMessage(msg);
+                if (err == null) { Cfg.UpdateMsgSentFor = AppInfo.Version; Cfg.Save(); }
+                else { updatedFromVersion = from; LogService.Write("", "Discord", "update message failed: " + err, 0); }
+            }
+            catch (Exception ex) { ErrorLog.Write("update message", ex); }
+        }
+
+        // "What's new" once after an update; a fresh install gets the tutorial instead
+        void ShowWhatsNewIfUpdated(bool freshInstall)
+        {
+            try
+            {
+                if (Cfg.LastSeenVersion == AppInfo.Version) return;
+                if (freshInstall)
+                {
+                    Cfg.LastSeenVersion = AppInfo.Version;
+                    Cfg.Save();
+                    return;
+                }
+                if (autoStartLaunch) return;   // started with Windows: nobody is looking, show it at the next manual start
+                bool newer = ReleaseNotes.IsNewer(AppInfo.Version, Cfg.LastSeenVersion);
+                Cfg.LastSeenVersion = AppInfo.Version;
+                Cfg.Save();
+                if (!newer) return;
+                var notes = ReleaseNotes.Get(AppInfo.Version);
+                if (notes == null) return;
+                var dlg = new WhatsNewDialog(AppInfo.Version, notes);
+                dlg.Show(this);
+            }
+            catch (Exception ex) { ErrorLog.Write("whats new", ex); }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

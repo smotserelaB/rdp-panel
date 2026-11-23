@@ -1,16 +1,32 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace RdpPanel
 {
     // the pop-up that shows when a newer version exists
-    // result: Yes = download now, Ignore = skip this version, Cancel = remind me later
+    // result: Yes = update / download (InstallerPath is set when the installer was downloaded and checked here),
+    //         Ignore = skip this version, Cancel = remind me later
     class UpdateDialog : Form
     {
+        // set when "Update now" downloaded and verified the installer: the caller starts it
+        public string InstallerPath;
+
+        readonly UpdateInfo info;
+        readonly bool selfInstall;
+        readonly Label hint;
+        readonly ProgressBar bar;
+        CancellationTokenSource cts;
+        bool selfInstallFailed;
+
         public UpdateDialog(UpdateInfo info)
         {
+            this.info = info;
+            // the app can update itself when it was installed with the installer and the files are online
+            selfInstall = info.FilesReady && UpdateInstaller.CanSelfInstall;
+
             UI.Init(this, "RDP Panel update", 500, 430);
             ShowInTaskbar = true;
             TopMost = true;   // also visible above the session windows at startup
@@ -83,9 +99,11 @@ namespace RdpPanel
             };
             Controls.Add(notes);
 
-            var hint = new Label
+            hint = new Label
             {
-                Text = "Your sessions and settings are kept when you update.",
+                Text = selfInstall
+                    ? "RDP Panel closes, updates and starts again. Your sessions and settings are kept."
+                    : "Your sessions and settings are kept when you update.",
                 ForeColor = Theme.FgMuted,
                 AutoSize = false,
                 Size = new Size(452, 20),
@@ -93,16 +111,60 @@ namespace RdpPanel
                 BackColor = Color.Transparent
             };
             Controls.Add(hint);
+            bar = new ProgressBar { Location = new Point(24, 360), Size = new Size(452, 10), Minimum = 0, Maximum = 100, Visible = false };
+            Controls.Add(bar);
 
-            var btnGet = UI.Btn(this, "Download now", 24, 380, 150, true);
+            var btnGet = UI.Btn(this, selfInstall ? "Update now" : "Download now", 24, 380, 150, true);
             var btnLater = UI.Btn(this, "Remind me later", 184, 380, 140, false);
             var btnSkip = UI.Btn(this, "Skip this version", 334, 380, 142, false);
-            btnGet.Click += (s, e) => { DialogResult = DialogResult.Yes; Close(); };
-            btnLater.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+            btnGet.Click += async (s, e) =>
+            {
+                if (!selfInstall || selfInstallFailed) { DialogResult = DialogResult.Yes; Close(); return; }
+
+                btnGet.Enabled = false;
+                btnSkip.Enabled = false;
+                btnLater.Text = "Cancel";
+                bar.Value = 0;
+                bar.Visible = true;
+                hint.ForeColor = Theme.FgMuted;
+                hint.Text = "Downloading v" + info.Version + "…";
+                cts = new CancellationTokenSource();
+                var token = cts.Token;
+
+                var res = await UpdateInstaller.DownloadAsync(info, p =>
+                {
+                    if (!IsDisposed && !token.IsCancellationRequested) { bar.Value = Math.Max(0, Math.Min(100, p)); hint.Text = "Downloading v" + info.Version + "…  " + p + "%"; }
+                }, token);
+
+                if (IsDisposed || token.IsCancellationRequested) return;
+                if (res.Path != null)
+                {
+                    InstallerPath = res.Path;
+                    DialogResult = DialogResult.Yes;
+                    Close();
+                    return;
+                }
+                // failed: offer the download page instead
+                bar.Visible = false;
+                hint.ForeColor = Theme.Bad;
+                hint.Text = "Could not update here: " + res.Error;
+                btnLater.Text = "Remind me later";
+                btnSkip.Enabled = true;
+                btnGet.Text = "Open download page";
+                btnGet.Enabled = true;
+                selfInstallFailed = true;
+            };
+            btnLater.Click += (s, e) => { if (cts != null) cts.Cancel(); DialogResult = DialogResult.Cancel; Close(); };
             btnSkip.Click += (s, e) => { DialogResult = DialogResult.Ignore; Close(); };
             AcceptButton = btnGet;
             CancelButton = btnLater;
             notes.Select(0, 0);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (cts != null) cts.Cancel();
+            base.OnFormClosing(e);
         }
 
         // GitHub release notes are markdown: make them readable as plain text

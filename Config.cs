@@ -159,6 +159,10 @@ namespace RdpPanel
         // first start: show the tutorial once
         public bool TutorialDone;
 
+        // the version that was running the last time the panel was started (to show "What's new" once after an update)
+        public string LastSeenVersion = "";
+        public string UpdateMsgSentFor = "";   // the version for which the "updated" message was sent to the bot channel
+
         // window
         public int WinX = -1;
         public int WinY = -1;
