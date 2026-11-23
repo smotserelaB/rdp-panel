@@ -1,0 +1,79 @@
+name: Build and release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from AppInfo.cs
+        id: ver
+        shell: pwsh
+        run: |
+          $m = Select-String -Path AppInfo.cs -Pattern 'Version = "([^"]+)"'
+          $v = $m.Matches[0].Groups[1].Value
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "AppInfo version: $v"
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "Tag $env:GITHUB_REF_NAME does not match AppInfo.Version $v"
+          }
+
+      - name: Create the RDP interop DLLs (aximp)
+        shell: pwsh
+        run: |
+          $ax = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows" -Recurse -Filter aximp.exe -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+          if (-not $ax) { throw "aximp.exe not found on this runner" }
+          New-Item -ItemType Directory -Force lib | Out-Null
+          Push-Location lib
+          & $ax.FullName "$env:windir\system32\mstscax.dll"
+          Pop-Location
+          if (-not (Test-Path lib\AxMSTSCLib.dll)) { throw "aximp did not create AxMSTSCLib.dll" }
+
+      - name: Build
+        run: dotnet build RdpPanel.csproj -c Release -p:Version=${{ steps.ver.outputs.version }}
+
+      - name: Single exe and zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $size = (Get-Item bin\Release\net48\RdpPanel.exe).Length
+          if ($size -lt 500000) { throw "RdpPanel.exe is only $size bytes: the DLLs were not built into it (Costura.Fody)" }
+          Copy-Item bin\Release\net48\RdpPanel.exe dist\RdpPanel.exe
+          Compress-Archive -Path dist\RdpPanel.exe -DestinationPath "dist\RdpPanel-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\installer.iss
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $sums = @(Get-ChildItem dist -File | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          })
+          $sums | Out-File dist\SHA256SUMS.txt -Encoding ascii
+          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RdpPanel-${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
