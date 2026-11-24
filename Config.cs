@@ -45,6 +45,8 @@ namespace RdpPanel
         public int FrozenMinutes;           // 0 = off; connected but the picture has not changed for this long = frozen
         public bool FrozenReconnect;        // reconnect by itself when frozen
         public bool HideInMonitoring;       // not shown on the Monitoring page and in the performance overview
+        public bool HideInDailySummary;     // not shown in the Daily summary
+        public bool HideInPcList;           // not shown in PC management
         public string AltId = "";           // the alt account (Alt accounts tab) that plays on this session
 
         [ScriptIgnore]

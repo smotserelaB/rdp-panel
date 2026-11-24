@@ -67,7 +67,7 @@ namespace RdpPanel
 
         public static Button MakeButton(string text, bool accent)
         {
-            var b = new Button
+            var b = new RoundButton
             {
                 Text = text,
                 AutoSize = true,

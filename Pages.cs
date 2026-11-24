@@ -205,6 +205,7 @@ namespace RdpPanel
     {
         readonly MainForm main;
         readonly ListView lv = UI.NewList();
+        Button btnRestorePc;
 
         public PcPage(MainForm main)
         {
@@ -221,7 +222,7 @@ namespace RdpPanel
             lv.Columns.Add("Label", 180);
             lv.Dock = DockStyle.Fill;
 
-            var bar = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Theme.Bg };
+            var bar = new Panel { Dock = DockStyle.Bottom, Height = 96, BackColor = Theme.Bg };
             int x = 0;
             AddBtn(bar, "Turn on (Wake-on-LAN)", ref x, 190, () => { var t = Sel(); if (t != null) t.DoWake(); });
             AddBtn(bar, "↻ Restart", ref x, 120, () => { var t = Sel(); if (t != null) t.DoPower(true); });
@@ -229,6 +230,15 @@ namespace RdpPanel
             AddBtn(bar, "Reconnect", ref x, 150, () => { var t = Sel(); if (t != null) t.Reconnect(); });
             AddBtn(bar, "Search network…", ref x, 150, () => main.ScanNetwork());
             AddBtn(bar, "Import users…", ref x, 180, () => main.ImportUsers());
+
+            // second row: take a PC off this list (it keeps running, it is only not shown here)
+            var btnRemovePc = UI.Btn(bar, "Remove from this list", 0, 54, 190, false);
+            btnRemovePc.Click += (s, e) => { var t = Sel(); if (t != null) main.RemoveFrom(t, 2); };
+            btnRestorePc = UI.Btn(bar, "Show removed again", 198, 54, 220, false);
+            btnRestorePc.Click += (s, e) => main.RestoreAll(2);
+            btnRestorePc.Visible = false;
+
+            lv.ContextMenuStrip = main.MakePlaceMenu(2, "PC management", lv);
 
             Controls.Add(lv);
             Controls.Add(bar);
@@ -253,7 +263,7 @@ namespace RdpPanel
             var sel = Sel();
             lv.BeginUpdate();
             lv.Items.Clear();
-            foreach (var t in main.Tiles)
+            foreach (var t in main.Tiles.Where(x => !x.Config.HideInPcList))
             {
                 var it = new ListViewItem(t.Config.Name) { Tag = t };
                 it.SubItems.Add(t.Config.Host);
@@ -265,6 +275,9 @@ namespace RdpPanel
                 lv.Items.Add(it);
             }
             lv.EndUpdate();
+            int removed = main.RemovedCount(2);
+            btnRestorePc.Visible = removed > 0;
+            btnRestorePc.Text = "Show " + removed + " removed again";
         }
     }
 

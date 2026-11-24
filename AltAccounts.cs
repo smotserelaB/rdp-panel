@@ -192,7 +192,6 @@ namespace RdpPanel
         static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
 
         static readonly AltItem[] Items = AltItems.All;
-        static readonly long[] Steps = { 1, 10, 100, 1000, 10000 };
 
         const int CardW = 1060;
         const int HeadH = 66;      // the row with name, kind and session
@@ -491,11 +490,11 @@ namespace RdpPanel
 
         Control BuildCard(AltAccount a, List<AltSnap> hist)
         {
-            var outer = new Panel { Width = CardW, Height = 2 + HeadH + (a.Collapsed ? 0 : DetailsH), Margin = new Padding(0, 0, 0, 14), BackColor = Theme.Line, Padding = new Padding(1), Tag = a };
-            var inner = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
-            outer.Controls.Add(inner);
-            var details = new Panel { Location = new Point(0, HeadH), Size = new Size(CardW - 2, DetailsH), BackColor = Theme.Surface, Visible = !a.Collapsed };
+            var outer = new RoundedPanel { Width = CardW, Height = HeadH + (a.Collapsed ? 0 : DetailsH), Margin = new Padding(0, 0, 0, 14), Tag = a };
+            var inner = outer;
+            var details = new Panel { Location = new Point(0, HeadH), Size = new Size(CardW, DetailsH), BackColor = Color.Transparent, Visible = !a.Collapsed };
             inner.Controls.Add(details);
+            details.Controls.Add(new Panel { Location = new Point(16, 0), Size = new Size(CardW - 32, 1), BackColor = Theme.Line });
 
             // ---- row 1: name, kind, session
             UI.Lbl(inner, "Name", 16, 8, 160, true).Font = Theme.UI(8.5f);
@@ -553,7 +552,7 @@ namespace RdpPanel
             {
                 a.Collapsed = !a.Collapsed;
                 details.Visible = !a.Collapsed;
-                outer.Height = 2 + HeadH + (a.Collapsed ? 0 : DetailsH);
+                outer.Height = HeadH + (a.Collapsed ? 0 : DetailsH);
                 btnCollapse.Text = a.Collapsed ? "▸" : "▾";
                 main.Cfg.Save();
             };
@@ -562,9 +561,6 @@ namespace RdpPanel
             del.Click += (s, e) => RemoveAlt(a);
 
             // ---- details: step, bottom strip (created first: the numbers use them)
-            var cmbStep = new NoWheelCombo { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
-            foreach (var st in Steps) cmbStep.Items.Add(st.ToString("N0"));
-            cmbStep.SelectedIndex = 1;   // 10
             var lblUpd = new Label { Location = new Point(590, 208), Size = new Size(210, 22), ForeColor = Theme.FgMuted, BackColor = Color.Transparent };
             lblUpd.Text = UpdText(a);
 
@@ -577,9 +573,7 @@ namespace RdpPanel
                 UI.Lbl(details, it.Emoji + "  " + it.Label + ":", x, y, 180, false).Font = Theme.UI(9f);
 
                 var num = new NoWheelNumeric { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true, Value = Math.Max(0, it.Get(a)) };
-                var minus = UI.Btn(details, "−", x, y + 22, 30, false);
-                UI.Put(details, num, x + 34, y + 24, 92);
-                var plus = UI.Btn(details, "+", x + 130, y + 22, 30, false);
+                UI.Put(details, num, x, y + 24, 160);
 
                 UI.Lbl(details, "🎯", x, y + 54, 22, true);
                 var numGoal = new NoWheelNumeric { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true };
@@ -627,17 +621,13 @@ namespace RdpPanel
                     showGoal();
                     QueueSave();
                 };
-                minus.Click += (s, e) => num.Value = Math.Max(num.Minimum, num.Value - Steps[Math.Max(0, cmbStep.SelectedIndex)]);
-                plus.Click += (s, e) => num.Value = Math.Min(num.Maximum, num.Value + Steps[Math.Max(0, cmbStep.SelectedIndex)]);
             }
 
             // ---- bottom strip: note, step, last updated, this week
             UI.Lbl(details, "Note", 16, 210, 40, true);
             var txtNote = new TextBox { Text = a.Note };
-            UI.Put(details, txtNote, 56, 206, 380);
+            UI.Put(details, txtNote, 56, 206, 510);
             txtNote.TextChanged += (s, e) => { a.Note = txtNote.Text; Touch(a, lblUpd); QueueSave(); };
-            UI.Lbl(details, "Step", 450, 210, 40, true);
-            UI.Put(details, cmbStep, 490, 206, 80);
             details.Controls.Add(lblUpd);
 
             var lblWeek = new Label { Location = new Point(16, 242), Size = new Size(760, 24), ForeColor = Theme.FgMuted, BackColor = Color.Transparent, Text = WeekText(hist, a) };

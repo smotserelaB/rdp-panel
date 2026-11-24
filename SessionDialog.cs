@@ -23,6 +23,8 @@ namespace RdpPanel
         readonly NumericUpDown numRamWarn = new NumericUpDown { Minimum = 0, Maximum = 100 };
         readonly NumericUpDown numFrozen = new NumericUpDown { Minimum = 0, Maximum = 240 };
         readonly CheckBox chkFrozenRe = new CheckBox { Text = "Reconnect by itself when frozen", AutoSize = true };
+        readonly CheckBox chkSum = new CheckBox { Text = "Show in the Daily summary", AutoSize = true };
+        readonly CheckBox chkPc = new CheckBox { Text = "Show in PC management", AutoSize = true };
         readonly CheckBox chkMon = new CheckBox { Text = "Show on the Monitoring page and in the performance overview", AutoSize = true };
         readonly Button btnColor;
         string colorHex;
@@ -93,6 +95,14 @@ namespace RdpPanel
             chkMon.Location = new Point(190, y);
             chkMon.ForeColor = Theme.Fg;
             Controls.Add(chkMon);
+            y += 28;
+            chkSum.Location = new Point(190, y);
+            chkSum.ForeColor = Theme.Fg;
+            Controls.Add(chkSum);
+            y += 28;
+            chkPc.Location = new Point(190, y);
+            chkPc.ForeColor = Theme.Fg;
+            Controls.Add(chkPc);
             y += 34;
             int by = y + 6;   // y of the buttons
 
@@ -113,6 +123,8 @@ namespace RdpPanel
             numFrozen.Value = Math.Max(0, Math.Min(240, sc.FrozenMinutes));
             chkFrozenRe.Checked = sc.FrozenReconnect;
             chkMon.Checked = !sc.HideInMonitoring;
+            chkSum.Checked = !sc.HideInDailySummary;
+            chkPc.Checked = !sc.HideInPcList;
             colorHex = sc.ColorHex;
             ShowColor();
 
@@ -166,6 +178,8 @@ namespace RdpPanel
             sc.FrozenMinutes = (int)numFrozen.Value;
             sc.FrozenReconnect = chkFrozenRe.Checked;
             sc.HideInMonitoring = !chkMon.Checked;
+            sc.HideInDailySummary = !chkSum.Checked;
+            sc.HideInPcList = !chkPc.Checked;
         }
     }
 }

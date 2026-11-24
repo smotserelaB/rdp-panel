@@ -113,6 +113,8 @@ namespace RdpPanel
         readonly Label lblSound = new Label();
         readonly ToggleSwitch swSound = new ToggleSwitch();
         bool syncingSound;
+        int soundAssert = 40;                 // for a while after start and after a change: make sure the sound state in the mixer is right
+        readonly ToolTip tips = new ToolTip();
 
         readonly NotifyIcon notify = new NotifyIcon();
         readonly Timer clock = new Timer { Interval = 1000 };
@@ -215,6 +217,7 @@ namespace RdpPanel
                 if (tick % 30 == 5) CheckDailyReport();
                 if (tick % 30 == 12) SendUpdatedMessage();
                 if (tick % 5 == 2) UpdateTrayIcon();
+                if (tick % 5 == 3) ApplySound();
                 if (tick % 600 == 17) pgAlt.SnapshotToday();
                 if (page == 0 && focused == null && (filterMode != 0 || Cfg.SortMode >= 2) && tick % (Cfg.SortMode >= 3 ? 30 : 4) == 1) RearrangeIfChanged();
                 if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
@@ -619,6 +622,7 @@ namespace RdpPanel
             lvSum.Columns.Add("Connected time", 110);
             lvSum.Columns.Add("Status", 90);
             cardSum.Body.Controls.Add(lvSum);
+            lvSum.ContextMenuStrip = MakePlaceMenu(1, "the Daily summary", lvSum);
 
             // log
             cardLog = new Card("Log") { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 0) };
@@ -765,6 +769,8 @@ namespace RdpPanel
                 Cfg.AlertSound = swSound.Checked;
                 lblSound.Text = Cfg.AlertSound ? "Sound on" : "Sound off";
                 Cfg.Save();
+                soundAssert = 40;
+                AppAudio.SetMuted(!Cfg.AlertSound);
             };
 
             footer.Controls.AddRange(new Control[] { lblFootL, lblWarn, lblSound, swSound, lblAlerts, swAlerts });
@@ -995,6 +1001,7 @@ namespace RdpPanel
         void AddConfigured(SessionConfig sc, bool connect)
         {
             Cfg.Sessions.Add(sc);
+            AddToActiveProfile(sc.Name);   // otherwise the new session is hidden again after a restart
             var t = CreateTile(sc);
             Cfg.Save();
             RebuildPerf();
@@ -1003,14 +1010,27 @@ namespace RdpPanel
             if (connect) t.Connect();
         }
 
+        void AddToActiveProfile(string name)
+        {
+            if (string.IsNullOrEmpty(Cfg.ActiveProfile)) return;
+            var p = Cfg.Profiles.FirstOrDefault(x => x.Name == Cfg.ActiveProfile);
+            if (p != null && !p.Sessions.Contains(name)) p.Sessions.Add(name);
+        }
+
         void EditSession(SessionTile t)
         {
             DialogResult r;
+            string oldName = t.Config.Name;
             using (var dlg = new SessionDialog(t.Config, true))
                 r = dlg.ShowDialog(this);
 
             if (r == DialogResult.Abort) { RemoveTile(t); return; }
             if (r != DialogResult.OK) return;
+
+            if (oldName != t.Config.Name)   // the profiles know the sessions by name
+                foreach (var pr in Cfg.Profiles)
+                    for (int i = 0; i < pr.Sessions.Count; i++)
+                        if (pr.Sessions[i] == oldName) pr.Sessions[i] = t.Config.Name;
 
             PropagateAdmin(t.Config);
             Cfg.Save();
@@ -1622,7 +1642,96 @@ namespace RdpPanel
                 swSound.Checked = Cfg.AlertSound;
                 lblSound.Text = Cfg.AlertSound ? "Sound on" : "Sound off";
                 syncingSound = false;
+                soundAssert = 40;
             }
+        }
+
+        // "Sound off" mutes everything the panel plays in the Windows volume mixer (the sound of the sessions too);
+        // sound that starts later gets the same state, so it is repeated now and then
+        void ApplySound()
+        {
+            if (!Cfg.AlertSound) AppAudio.SetMuted(true);
+            else if (soundAssert > 0) { soundAssert--; AppAudio.SetMuted(false); }
+        }
+
+        // ----- remove a session from one place (the session itself keeps running) -----
+        // place: 0 = Monitoring page and performance overview, 1 = Daily summary, 2 = PC management
+
+        internal int RemovedCount(int place)
+        {
+            return Cfg.Sessions.Count(sc => place == 0 ? sc.HideInMonitoring : place == 1 ? sc.HideInDailySummary : sc.HideInPcList);
+        }
+
+        internal void RemoveFrom(SessionTile t, int place)
+        {
+            if (place == 0) t.Config.HideInMonitoring = true;
+            else if (place == 1) t.Config.HideInDailySummary = true;
+            else t.Config.HideInPcList = true;
+            Cfg.Save();
+            RefreshRemoved();
+        }
+
+        internal void RestoreAll(int place)
+        {
+            foreach (var sc in Cfg.Sessions)
+            {
+                if (place == 0) sc.HideInMonitoring = false;
+                else if (place == 1) sc.HideInDailySummary = false;
+                else sc.HideInPcList = false;
+            }
+            Cfg.Save();
+            RefreshRemoved();
+        }
+
+        void RefreshRemoved()
+        {
+            RebuildPerf();
+            RefreshSummary();
+            pgMon.Rebuild();
+            pgPc.RefreshData();
+        }
+
+        // right-click menu of a list: remove the session under the mouse, and show the removed ones again
+        internal ContextMenuStrip MakePlaceMenu(int place, string placeName, ListView lv)
+        {
+            var m = Theme.MakeMenu();
+            var rm = new ToolStripMenuItem("");
+            var back = new ToolStripMenuItem("");
+            rm.Click += (s, e) => { var tl = rm.Tag as SessionTile; if (tl != null) RemoveFrom(tl, place); };
+            back.Click += (s, e) => RestoreAll(place);
+            m.Items.Add(rm);
+            m.Items.Add(back);
+            m.Opening += (s, e) =>
+            {
+                var pt = lv.PointToClient(Cursor.Position);
+                var li = lv.GetItemAt(pt.X, pt.Y);
+                var tile = li == null ? null : li.Tag as SessionTile;
+                rm.Tag = tile;
+                rm.Visible = tile != null;
+                if (tile != null) rm.Text = "Remove '" + tile.Config.Name + "' from " + placeName;
+                int n = RemovedCount(place);
+                back.Visible = n > 0;
+                back.Text = "Show " + n + " removed session" + (n == 1 ? "" : "s") + " again";
+                if (tile == null && n == 0) e.Cancel = true;
+            };
+            return m;
+        }
+
+        // the same for the cards of the performance overview
+        ContextMenuStrip MakeCardMenu(SessionTile tile)
+        {
+            var m = Theme.MakeMenu();
+            m.Items.Add("Remove '" + tile.Config.Name + "' from the performance overview", null, (s, e) => RemoveFrom(tile, 0));
+            var back = new ToolStripMenuItem("");
+            back.Click += (s, e) => RestoreAll(0);
+            m.Items.Add(back);
+            m.Opening += (s, e) =>
+            {
+                int n = RemovedCount(0);
+                back.Visible = n > 0;
+                back.Text = "Show " + n + " removed session" + (n == 1 ? "" : "s") + " again";
+            };
+            return m;
         }
 
         // a message from the panel itself (not from a session): balloon, and a sound unless the sound is off
@@ -1675,6 +1784,20 @@ namespace RdpPanel
             perfFlow.SuspendLayout();
             perfFlow.Controls.Clear();
             perf.Clear();
+            if (perfFlow.ContextMenuStrip == null)   // empty place of the overview: show the removed sessions again
+            {
+                var back = new ToolStripMenuItem("");
+                back.Click += (s, e) => RestoreAll(0);
+                var fm = Theme.MakeMenu();
+                fm.Items.Add(back);
+                fm.Opening += (s, e) =>
+                {
+                    int n = RemovedCount(0);
+                    back.Text = "Show " + n + " removed session" + (n == 1 ? "" : "s") + " again";
+                    if (n == 0) e.Cancel = true;
+                };
+                perfFlow.ContextMenuStrip = fm;
+            }
             foreach (var t in Tiles.Where(x => !x.Config.HideInMonitoring))
             {
                 var p = new Panel { Width = 164, Height = 120, Margin = new Padding(0, 0, 8, 0), BackColor = Theme.Surface };
@@ -1682,10 +1805,25 @@ namespace RdpPanel
                 spark.Lines.Add(new Spark.Series { V = t.CpuHist, C = Theme.Accent });
                 spark.Lines.Add(new Spark.Series { V = t.RamHist, C = Color.FromArgb(160, 110, 255) });
                 var vals = new Label { Dock = DockStyle.Top, Height = 18, ForeColor = Theme.FgMuted, Font = Theme.UI(8f), TextAlign = ContentAlignment.MiddleLeft };
-                var name = new Label { Dock = DockStyle.Top, Height = 20, ForeColor = Theme.Fg, Font = Theme.UI(9f, FontStyle.Bold), Text = t.Config.Name, AutoEllipsis = true };
+                var name = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Fg, Font = Theme.UI(9f, FontStyle.Bold), Text = t.Config.Name, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
+                var tile = t;
+                var rm = new Label { Dock = DockStyle.Right, Width = 22, Text = "✕", TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.FgMuted, Cursor = Cursors.Hand };
+                rm.MouseEnter += (s, e) => rm.ForeColor = Theme.Bad;
+                rm.MouseLeave += (s, e) => rm.ForeColor = Theme.FgMuted;
+                rm.Click += (s, e) => RemoveFrom(tile, 0);
+                tips.SetToolTip(rm, "Remove from the performance overview");
+                var head = new Panel { Dock = DockStyle.Top, Height = 22, BackColor = Color.Transparent };
+                head.Controls.Add(name);
+                head.Controls.Add(rm);
                 p.Controls.Add(spark);
                 p.Controls.Add(vals);
-                p.Controls.Add(name);
+                p.Controls.Add(head);
+                var cardMenu = MakeCardMenu(t);
+                p.ContextMenuStrip = cardMenu;
+                spark.ContextMenuStrip = cardMenu;
+                vals.ContextMenuStrip = cardMenu;
+                name.ContextMenuStrip = cardMenu;
+                head.ContextMenuStrip = cardMenu;
                 perfFlow.Controls.Add(p);
                 perf.Add(new PerfItem { Tile = t, Vals = vals });
             }
@@ -1716,14 +1854,15 @@ namespace RdpPanel
             int total = 0;
             lvSum.BeginUpdate();
             lvSum.Items.Clear();
-            int hiddenCount = 0;
+            int hiddenCount = 0, removedCount = 0;
             foreach (var t in Tiles)
             {
                 // only sessions that are on the screens (active profile); the rest is counted below the list
                 if (hidden.Contains(t)) { hiddenCount++; continue; }
+                if (t.Config.HideInDailySummary) { removedCount++; continue; }
                 int secs = te.Where(e => e.Session == t.Config.Name && e.Event == "Disconnected").Sum(e => e.Seconds) + t.ConnectedSeconds;
                 total += secs;
-                var it = new ListViewItem(t.Config.Name) { UseItemStyleForSubItems = false };
+                var it = new ListViewItem(t.Config.Name) { UseItemStyleForSubItems = false, Tag = t };
                 it.SubItems.Add(UI.Dur(secs));
                 string st = t.StatusLabel;
                 var sub = it.SubItems.Add(st);
@@ -1737,6 +1876,14 @@ namespace RdpPanel
                 hi.SubItems.Add("");
                 hi.SubItems.Add("");
                 lvSum.Items.Add(hi);
+            }
+            if (removedCount > 0)
+            {
+                var ri = new ListViewItem(removedCount + " removed (right-click to show again)") { UseItemStyleForSubItems = false };
+                ri.ForeColor = Theme.FgMuted;
+                ri.SubItems.Add("");
+                ri.SubItems.Add("");
+                lvSum.Items.Add(ri);
             }
             lvSum.EndUpdate();
             totalToday = total;
