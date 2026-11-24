@@ -81,3 +81,10 @@ The Daily summary shows only the sessions on your screens (the active profile). 
 
 Discord message rules (Settings)
 Under the Discord bot you can pause all automatic Discord messages, set quiet hours (send nothing, or only drops and PCs that stop responding) and set a maximum number of messages per hour. Above the limit messages wait and you get one summary. The daily report, bot commands and test buttons are not limited (the daily report is only stopped by Pause). Warnings on screen, sound and the log are not affected.
+
+Overview: filter, sort, pin, mute, compact (1.3.0)
+Above the tiles you choose what to show (all, problems, offline, connected) and the sort order. Pinned sessions are always first. Right-click the header of a tile (or use the menu with the three dots) to pin it or to mute its notifications for 1, 8 or 24 hours. The Compact button makes small tiles with the status, CPU and RAM. A double-click on the header shows the tile large and back. The Activity button opens a window that shows what the panel is doing with each session. The tray icon is green when all sessions on your screens are connected, yellow when some are and red when none are.
+In the session settings (the pencil on a tile) you can set a CPU and RAM warning level for that session only, switch on the frozen warning (the picture has not changed for N minutes, with an optional automatic reconnect) and choose whether the session is shown on the Monitoring page. On the Monitoring page the Remove button takes a session off the page; Show all again brings them back.
+
+Alt accounts
+The tab Alt accounts is for your Bee Swarm alts. Add one with the button, then fill in the name, the kind of alt and the numbers. Everything is saved by itself. For the hive picture use Choose, Paste (a screenshot from the clipboard) or drop a file on the picture; click the picture to see it large.
