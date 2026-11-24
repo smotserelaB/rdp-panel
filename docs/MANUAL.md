@@ -99,3 +99,9 @@ The tab Alt accounts is for your Bee Swarm alts. Add one with the button, then f
 
 Sound and search
 The switch Sound on/off in the bar at the bottom turns all sounds of the panel off. Ctrl+K opens a search window for sessions, pages, alt accounts and a few actions (compact view, activity window, sound, pause Discord).
+
+Sound off (1.4.1)
+The switch Sound on/off in the bar at the bottom mutes the whole panel in the Windows volume mixer: the alert sounds and the sound of your RDP sessions. You can see and change it there too (the app is called RdpPanel).
+
+Removing a session from a list
+A session can be taken out of the Performance overview (the x on its card or right-click), the Daily summary (right-click) and PC management (the button Remove from this list, or right-click). The session keeps running and is still in the Discord report. The same right-click menu shows the removed sessions again, and in the session settings you can choose where a session is shown.
