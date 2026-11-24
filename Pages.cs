@@ -13,6 +13,8 @@ namespace RdpPanel
         readonly MainForm main;
         readonly FlowLayoutPanel flow = new FlowLayoutPanel();
         readonly List<Tuple<SessionTile, Card, Label>> items = new List<Tuple<SessionTile, Card, Label>>();
+        readonly Panel restoreBar = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Theme.Bg, Visible = false };
+        readonly Label lblRestore = new Label { AutoSize = true, Location = new Point(0, 9), ForeColor = Theme.FgMuted, BackColor = Color.Transparent };
 
         public MonitoringPage(MainForm main)
         {
@@ -24,6 +26,17 @@ namespace RdpPanel
             flow.AutoScroll = true;
             flow.BackColor = Theme.Bg;
             Controls.Add(flow);
+
+            restoreBar.Controls.Add(lblRestore);
+            var btnRestore = UI.Btn(restoreBar, "Show all again", 330, 3, 140, false);
+            btnRestore.Click += (s, e) =>
+            {
+                foreach (var sc in main.Cfg.Sessions) sc.HideInMonitoring = false;
+                main.Cfg.Save();
+                Rebuild();
+                main.RebuildPerfOverview();
+            };
+            Controls.Add(restoreBar);   // added last: docks above the charts
         }
 
         public void Rebuild()
@@ -31,22 +44,39 @@ namespace RdpPanel
             flow.SuspendLayout();
             flow.Controls.Clear();
             items.Clear();
-            foreach (var t in main.Tiles)
+            int removed = main.Tiles.Count(x => x.Config.HideInMonitoring);
+            restoreBar.Visible = removed > 0;
+            lblRestore.Text = removed + (removed == 1 ? " session is" : " sessions are") + " removed from monitoring (it is still checked and reported).";
+            foreach (var t in main.Tiles.Where(x => !x.Config.HideInMonitoring))
             {
+                var tile = t;
                 var card = new Card(t.Config.Name) { Width = 470, Height = 240, Margin = new Padding(0, 0, 14, 14) };
+                var bottom = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = Color.Transparent };
                 var vals = new Label
                 {
-                    Dock = DockStyle.Bottom,
-                    Height = 24,
+                    Dock = DockStyle.Fill,
                     ForeColor = Theme.FgMuted,
                     TextAlign = ContentAlignment.MiddleLeft,
                     BackColor = Color.Transparent
                 };
+                var rm = Theme.MakeButton("✕  Remove");
+                rm.AutoSize = false;
+                rm.Dock = DockStyle.Right;
+                rm.Width = 110;
+                rm.Click += (s, e) =>
+                {
+                    tile.Config.HideInMonitoring = true;
+                    main.Cfg.Save();
+                    Rebuild();
+                    main.RebuildPerfOverview();
+                };
+                bottom.Controls.Add(vals);
+                bottom.Controls.Add(rm);
                 var chart = new Spark { Dock = DockStyle.Fill, Grid = true, MaxPoints = 360, BackColor = Theme.Surface };
                 chart.Lines.Add(new Spark.Series { V = t.CpuHist, C = Theme.Accent });
                 chart.Lines.Add(new Spark.Series { V = t.RamHist, C = Color.FromArgb(160, 110, 255) });
                 card.Body.Controls.Add(chart);
-                card.Body.Controls.Add(vals);
+                card.Body.Controls.Add(bottom);
                 flow.Controls.Add(card);
                 items.Add(Tuple.Create(t, card, vals));
             }

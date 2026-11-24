@@ -75,6 +75,16 @@ namespace RdpPanel
         readonly Panel host = new Panel();
         readonly Panel strip = new Panel();
         MonitoringPage pgMon;
+        AltPage pgAlt;
+        int filterMode;                    // overview filter: 0 all, 1 problems, 2 offline, 3 connected
+        readonly ComboBox cmbFilter = new ComboBox();
+        readonly ComboBox cmbSort = new ComboBox();
+        readonly Button btnCompact = Theme.MakeButton("Compact");
+        ActivityForm activityForm;
+        string arrangeSig = "";
+        System.Drawing.Icon[] trayIcons;
+        int trayState = -2;
+        const int CompactH = 42;
         LogPage pgLog;
         PcPage pgPc;
         ProfilesPage pgProf;
@@ -140,6 +150,7 @@ namespace RdpPanel
             if (autoStart && Cfg.StartMinimized && !Cfg.BackgroundMode) WindowState = FormWindowState.Minimized;
 
             pgMon = new MonitoringPage(this);
+            pgAlt = new AltPage(this);
             pgLog = new LogPage(this);
             pgPc = new PcPage(this);
             pgProf = new ProfilesPage(this);
@@ -154,7 +165,7 @@ namespace RdpPanel
 
             content.Dock = DockStyle.Fill;
             content.BackColor = Theme.Bg;
-            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits })
+            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits, pgAlt })
             {
                 p.Dock = DockStyle.Fill;
                 p.Visible = false;
@@ -200,6 +211,8 @@ namespace RdpPanel
                 if (tick % 60 == 20) RecordMetrics();
                 if (tick % 30 == 5) CheckDailyReport();
                 if (tick % 30 == 12) SendUpdatedMessage();
+                if (tick % 5 == 2) UpdateTrayIcon();
+                if (page == 0 && focused == null && (filterMode != 0 || Cfg.SortMode >= 2) && tick % (Cfg.SortMode >= 3 ? 30 : 4) == 1) RearrangeIfChanged();
                 if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
                 if (updateRetryAt != DateTime.MinValue && DateTime.Now >= updateRetryAt) { updateRetryAt = DateTime.MinValue; CheckUpdateAsync(); }
                 if (Cfg.DiscordIntervalMin > 0 && Discord.IsValid(Cfg.WebhookUrl) && (DateTime.Now - lastDiscord).TotalMinutes >= Cfg.DiscordIntervalMin)
@@ -537,7 +550,9 @@ namespace RdpPanel
             rows.Controls.AddRange(new Control[] { lt, swTheme, lf, chipF });
 
             // navigation
-            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits" };
+            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts" };
+            // the page numbers stay as they are; this is where each one is shown in the list (Alt accounts under PC management)
+            int[] slot = { 0, 1, 2, 3, 5, 6, 7, 8, 4 };
             var navPanel = new Panel { Dock = DockStyle.Top, Height = names.Length * 44 + 14, BackColor = Theme.Surface };
             for (int i = 0; i < names.Length; i++)
             {
@@ -545,7 +560,7 @@ namespace RdpPanel
                 var b = new Button
                 {
                     Text = names[i],
-                    Location = new Point(10, 8 + i * 44),
+                    Location = new Point(10, 8 + slot[i] * 44),
                     Size = new Size(194, 40),
                     FlatStyle = FlatStyle.Flat,
                     TextAlign = ContentAlignment.MiddleLeft,
@@ -633,7 +648,59 @@ namespace RdpPanel
 
             pgOverview.Controls.Add(host);
             pgOverview.Controls.Add(strip);
+
+            // filter, sort and view above the tiles
+            var bar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Bg };
+            var barFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, BackColor = Theme.Bg, Padding = new Padding(8, 5, 8, 0) };
+            foreach (var cb in new[] { cmbFilter, cmbSort })
+            {
+                cb.DropDownStyle = ComboBoxStyle.DropDownList;
+                cb.FlatStyle = FlatStyle.Flat;
+                Theme.StyleInput(cb);
+                cb.Margin = new Padding(0, 3, 14, 0);
+            }
+            cmbFilter.Width = 130;
+            cmbFilter.Items.AddRange(new object[] { "All sessions", "Problems", "Offline", "Connected" });
+            cmbFilter.SelectedIndex = 0;
+            cmbSort.Width = 170;
+            cmbSort.Items.AddRange(new object[] { "My own order", "Name", "Problems first", "CPU high to low", "FPS low to high" });
+            cmbSort.SelectedIndex = Math.Max(0, Math.Min(4, Cfg.SortMode));
+            cmbFilter.SelectedIndexChanged += (s, e) => { filterMode = cmbFilter.SelectedIndex; ArrangeTiles(); };
+            cmbSort.SelectedIndexChanged += (s, e) => { Cfg.SortMode = cmbSort.SelectedIndex; Cfg.Save(); ArrangeTiles(); };
+            btnCompact.Margin = new Padding(0, 0, 10, 0);
+            btnCompact.Click += (s, e) => { Cfg.CompactView = !Cfg.CompactView; Cfg.Save(); UpdateCompactButton(); ArrangeTiles(); };
+            UpdateCompactButton();
+            var btnActivity = Theme.MakeButton("Activity");
+            btnActivity.Margin = new Padding(0, 0, 10, 0);
+            btnActivity.Click += (s, e) => ShowActivity();
+            barFlow.Controls.Add(Lab("Show:", 46));
+            barFlow.Controls.Add(cmbFilter);
+            barFlow.Controls.Add(Lab("Sort:", 40));
+            barFlow.Controls.Add(cmbSort);
+            barFlow.Controls.Add(btnCompact);
+            barFlow.Controls.Add(btnActivity);
+            bar.Controls.Add(barFlow);
+            pgOverview.Controls.Add(bar);   // added last: docks above the tiles
         }
+
+        void UpdateCompactButton()
+        {
+            btnCompact.BackColor = Cfg.CompactView ? Theme.Accent : Theme.Raised;
+            btnCompact.ForeColor = Cfg.CompactView ? Color.White : Theme.Fg;
+        }
+
+        void ShowActivity()
+        {
+            if (activityForm == null || activityForm.IsDisposed)
+            {
+                activityForm = new ActivityForm(this);
+                activityForm.Show(this);
+            }
+            else activityForm.Activate();
+        }
+
+        internal bool IsHiddenByProfile(SessionTile t) { return hidden.Contains(t); }
+        internal void RebuildPerfOverview() { RebuildPerf(); }
 
         static Button ActionBtn(string text, Color back, Action a)
         {
@@ -703,6 +770,7 @@ namespace RdpPanel
             pgSet.Visible = idx == 5;
             pgHelp.Visible = idx == 6;
             pgCredits.Visible = idx == 7;
+            pgAlt.Visible = idx == 8;
 
             for (int i = 0; i < nav.Count; i++)
             {
@@ -718,6 +786,7 @@ namespace RdpPanel
             else if (idx == 3) pgPc.RefreshData();
             else if (idx == 4) pgProf.RefreshData();
             else if (idx == 5) pgSet.Load();
+            else if (idx == 8) pgAlt.Rebuild();
         }
 
         // ---------------------------------------------------------------- tiles
@@ -745,9 +814,36 @@ namespace RdpPanel
 
         bool Match(SessionTile t)
         {
+            switch (filterMode)
+            {
+                case 1: if (t.StatusLabel != "Dropped") return false; break;   // problems
+                case 2: if (t.Online) return false; break;                      // offline
+                case 3: if (!t.Online) return false; break;                      // connected
+            }
             if (filter.Length == 0) return true;
             string hay = (t.Config.Name + " " + t.Config.Host + " " + t.Config.Note).ToLowerInvariant();
             return hay.Contains(filter);
+        }
+
+        // the sessions on the screen in the order they are shown: pinned first, then the chosen sort
+        List<SessionTile> OrderedShown()
+        {
+            IEnumerable<SessionTile> q = Tiles.Where(t => !hidden.Contains(t) && Match(t));
+            switch (Cfg.SortMode)
+            {
+                case 1: q = q.OrderBy(t => t.Config.Name, StringComparer.CurrentCultureIgnoreCase); break;
+                case 2: q = q.OrderBy(t => t.StatusLabel == "Dropped" ? 0 : t.StatusLabel == "Offline" ? 1 : 2); break;
+                case 3: q = q.OrderByDescending(t => double.IsNaN(t.Cpu) ? -1.0 : t.Cpu); break;
+                case 4: q = q.OrderBy(t => double.IsNaN(t.Fps) ? double.MaxValue : t.Fps); break;
+            }
+            return q.OrderByDescending(t => t.Config.Pinned ? 1 : 0).ToList();   // OrderBy keeps the order inside each group
+        }
+
+        // when the filter or the sort result changes because a status changed
+        void RearrangeIfChanged()
+        {
+            var sig = string.Join("|", OrderedShown().Select(t => t.Config.Name));
+            if (sig != arrangeSig) ArrangeTiles();
         }
 
         static string GroupKey(SessionTile t)
@@ -761,7 +857,11 @@ namespace RdpPanel
         // moved to another parent, so connections stay stable.
         void ArrangeTiles()
         {
-            var shown = Tiles.Where(t => !hidden.Contains(t) && Match(t)).ToList();
+            var shown = OrderedShown();
+            arrangeSig = string.Join("|", shown.Select(t => t.Config.Name));
+            bool compactNow = Cfg.CompactView && focused == null;
+            foreach (var t in Tiles) t.SetCompact(compactNow);
+            host.AutoScroll = compactNow;
             foreach (var t in Tiles) if (!shown.Contains(t)) t.Visible = false;
             foreach (var l in groupLabels) l.Visible = false;
             lastGroups = new List<List<SessionTile>>();
@@ -784,7 +884,7 @@ namespace RdpPanel
             {
                 int rows = (int)Math.Ceiling(shown.Count / (double)cols);
                 lblRows.Text = "Rows: " + rows;
-                int ch = Math.Max(10, (area.Height - Gap) / rows);
+                int ch = compactNow ? CompactH + Gap : Math.Max(10, (area.Height - Gap) / rows);
                 for (int i = 0; i < shown.Count; i++)
                 {
                     shown[i].Visible = true;
@@ -799,7 +899,7 @@ namespace RdpPanel
             int totalRows = lastGroups.Sum(g => (int)Math.Ceiling(g.Count / (double)cols));
             lblRows.Text = "Rows: " + totalRows;
             int availH = area.Height - Gap - lastGroups.Count * (headH + 2);
-            int chg = Math.Max(10, availH / Math.Max(1, totalRows));
+            int chg = compactNow ? CompactH + Gap : Math.Max(10, availH / Math.Max(1, totalRows));
 
             while (groupLabels.Count < lastGroups.Count)
             {
@@ -1077,7 +1177,7 @@ namespace RdpPanel
 
         internal void ShowPageIndex(int idx)
         {
-            if (idx >= 0 && idx <= 7) ShowPage(idx);
+            if (idx >= 0 && idx <= 8) ShowPage(idx);
         }
 
         internal void ShowTutorial()
@@ -1180,6 +1280,39 @@ namespace RdpPanel
             return null;
         }
 
+        // ---------------------------------------------------------------- tray icon with the status color
+
+        static System.Drawing.Icon MakeDot(Color c)
+        {
+            using (var bmp = new Bitmap(32, 32))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    g.Clear(Color.Transparent);
+                    using (var br = new SolidBrush(c)) g.FillEllipse(br, 3, 3, 26, 26);
+                    using (var pen = new Pen(Color.FromArgb(190, 0, 0, 0), 2f)) g.DrawEllipse(pen, 3, 3, 26, 26);
+                }
+                return System.Drawing.Icon.FromHandle(bmp.GetHicon());   // the 3 icons stay alive as long as the panel runs
+            }
+        }
+
+        // green = all sessions on the screens connected, yellow = some, red = none
+        void UpdateTrayIcon()
+        {
+            try
+            {
+                var list = Tiles.Where(t => !hidden.Contains(t) && !string.IsNullOrWhiteSpace(t.Config.Host)).ToList();
+                int st = list.Count == 0 ? -1 : list.All(t => t.Online) ? 0 : list.Any(t => t.Online) ? 1 : 2;
+                if (st == trayState) return;
+                trayState = st;
+                if (st < 0) { notify.Icon = SystemIcons.Application; return; }
+                if (trayIcons == null) trayIcons = new[] { MakeDot(Theme.Good), MakeDot(Theme.Warn), MakeDot(Theme.Bad) };
+                notify.Icon = trayIcons[st];
+            }
+            catch (Exception ex) { ErrorLog.Write("tray icon", ex); }
+        }
+
         // ---------------------------------------------------------------- rules for Discord messages
 
         readonly List<DateTime> discordSent = new List<DateTime>();
@@ -1260,6 +1393,7 @@ namespace RdpPanel
             lblWarn.Text = "⚠ Warning: " + msg;
             warnAt = DateTime.Now;
             RefreshSummary();
+            if (t.IsMuted) return;                   // this session is muted
             if (DateTime.Now < MuteUntil) return;   // muted with /quiet
             // a CPU/RAM warning is less important than a session that is gone or a PC that does not respond
             bool critical = msg.IndexOf("CPU ", StringComparison.Ordinal) < 0 || msg.IndexOf("RAM ", StringComparison.Ordinal) < 0;
@@ -1379,7 +1513,7 @@ namespace RdpPanel
                 string path = SavePanelFile(shot.Item1);
                 if (path != null) LogService.Write(t.Config.Name, "Screenshot", path, 0);
             }
-            if (!Cfg.DiscordOnDrop || !Discord.IsValid(Cfg.WebhookUrl) || !DiscordAllowed(true)) return;
+            if (t.IsMuted || !Cfg.DiscordOnDrop || !Discord.IsValid(Cfg.WebhookUrl) || !DiscordAllowed(true)) return;
 
             var files = new List<KeyValuePair<string, byte[]>>();
             string age = "";
@@ -1467,7 +1601,7 @@ namespace RdpPanel
             perfFlow.SuspendLayout();
             perfFlow.Controls.Clear();
             perf.Clear();
-            foreach (var t in Tiles)
+            foreach (var t in Tiles.Where(x => !x.Config.HideInMonitoring))
             {
                 var p = new Panel { Width = 164, Height = 120, Margin = new Padding(0, 0, 8, 0), BackColor = Theme.Surface };
                 var spark = new Spark { Dock = DockStyle.Fill, BackColor = Theme.Surface };

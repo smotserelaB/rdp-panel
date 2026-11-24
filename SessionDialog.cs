@@ -19,6 +19,11 @@ namespace RdpPanel
         readonly NumericUpDown numW = new NumericUpDown { Minimum = 200, Maximum = 4096 };
         readonly NumericUpDown numH = new NumericUpDown { Minimum = 200, Maximum = 4096 };
         readonly CheckBox chkAuto = new CheckBox { Text = "Connect automatically at startup", AutoSize = true };
+        readonly NumericUpDown numCpuWarn = new NumericUpDown { Minimum = 0, Maximum = 100 };
+        readonly NumericUpDown numRamWarn = new NumericUpDown { Minimum = 0, Maximum = 100 };
+        readonly NumericUpDown numFrozen = new NumericUpDown { Minimum = 0, Maximum = 240 };
+        readonly CheckBox chkFrozenRe = new CheckBox { Text = "Reconnect by itself when frozen", AutoSize = true };
+        readonly CheckBox chkMon = new CheckBox { Text = "Show on the Monitoring page and in the performance overview", AutoSize = true };
         readonly Button btnColor;
         string colorHex;
 
@@ -66,6 +71,30 @@ namespace RdpPanel
             chkAuto.Location = new Point(190, y + 2);
             chkAuto.ForeColor = Theme.Fg;
             Controls.Add(chkAuto);
+            y += 40;
+
+            UI.Lbl(this, "Alerts and monitoring of this session", 16, y, 400, false).Font = Theme.UI(10f, FontStyle.Bold);
+            y += 30;
+            Row("Warn at CPU from (%)", numCpuWarn, ref y, 90);
+            UI.Lbl(this, "0 = the general value (Settings)", 290, y - 34, 220, true).Font = Theme.UI(8.25f);
+            Row("Warn at RAM from (%)", numRamWarn, ref y, 90);
+            UI.Lbl(this, "0 = the general value (Settings)", 290, y - 34, 220, true).Font = Theme.UI(8.25f);
+            Row("Frozen after (minutes)", numFrozen, ref y, 90);
+            UI.Lbl(this, "0 = off (needs the FPS display)", 290, y - 34, 220, true).Font = Theme.UI(8.25f);
+            y += 8;
+            chkFrozenRe.Location = new Point(190, y);
+            chkFrozenRe.ForeColor = Theme.Fg;
+            Controls.Add(chkFrozenRe);
+            y += 26;
+            var frozenHint = UI.Lbl(this, "An idle desktop also shows 0 FPS, so use this only for sessions where something always moves (a game).", 190, y, 310, true);
+            frozenHint.Height = 34;
+            frozenHint.Font = Theme.UI(8.25f);
+            y += 40;
+            chkMon.Location = new Point(190, y);
+            chkMon.ForeColor = Theme.Fg;
+            Controls.Add(chkMon);
+            y += 34;
+            int by = y + 6;   // y of the buttons
 
             txtName.Text = sc.Name;
             txtNote.Text = sc.Note;
@@ -79,19 +108,25 @@ namespace RdpPanel
             numW.Value = sc.Width;
             numH.Value = sc.Height;
             chkAuto.Checked = sc.AutoConnect;
+            numCpuWarn.Value = Math.Max(0, Math.Min(100, sc.CpuWarn));
+            numRamWarn.Value = Math.Max(0, Math.Min(100, sc.RamWarn));
+            numFrozen.Value = Math.Max(0, Math.Min(240, sc.FrozenMinutes));
+            chkFrozenRe.Checked = sc.FrozenReconnect;
+            chkMon.Checked = !sc.HideInMonitoring;
             colorHex = sc.ColorHex;
             ShowColor();
 
-            var ok = UI.Btn(this, "Save", 300, 588, 100, true);
-            var cancel = UI.Btn(this, "Cancel", 408, 588, 96, false);
+            var ok = UI.Btn(this, "Save", 300, by, 100, true);
+            var cancel = UI.Btn(this, "Cancel", 408, by, 96, false);
             cancel.DialogResult = DialogResult.Cancel;
             ok.Click += (s, e) => { Apply(); DialogResult = DialogResult.OK; };
             AcceptButton = ok;
             CancelButton = cancel;
+            ClientSize = new Size(ClientSize.Width, by + 52);
 
             if (allowDelete)
             {
-                var del = UI.Btn(this, "Remove", 16, 588, 100, false);
+                var del = UI.Btn(this, "Remove", 16, by, 100, false);
                 del.ForeColor = Theme.Bad;
                 del.Click += (s, e) => { DialogResult = DialogResult.Abort; };
             }
@@ -126,6 +161,11 @@ namespace RdpPanel
             sc.Width = (int)numW.Value;
             sc.Height = (int)numH.Value;
             sc.AutoConnect = chkAuto.Checked;
+            sc.CpuWarn = (int)numCpuWarn.Value;
+            sc.RamWarn = (int)numRamWarn.Value;
+            sc.FrozenMinutes = (int)numFrozen.Value;
+            sc.FrozenReconnect = chkFrozenRe.Checked;
+            sc.HideInMonitoring = !chkMon.Checked;
         }
     }
 }

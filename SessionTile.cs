@@ -27,6 +27,7 @@ namespace RdpPanel
         public event Action<SessionTile, string> AlertRaised;
         public event Action<SessionTile, string> Dropped;   // unexpected drop (with the reason)
         public event Action<SessionTile, SessionTile> ReorderRequested;
+        public event Action<SessionTile> LayoutChanged;   // pinned or unpinned: the overview has to be arranged again
 
         // ---- header ----
         readonly Panel header = new Panel();
@@ -37,6 +38,7 @@ namespace RdpPanel
         readonly Chip chipNote = new Chip();
         readonly Label lblPing = L(9f, FontStyle.Regular, Theme.FgMuted, ContentAlignment.MiddleRight);
         readonly Label lblFps = L(9f, FontStyle.Regular, Theme.FgMuted, ContentAlignment.MiddleRight);
+        readonly Label lblCompact = L(9f, FontStyle.Regular, Theme.FgMuted, ContentAlignment.MiddleRight);   // status, CPU and RAM in the compact view
         readonly Button btnExpand = Icon("⤢");
         readonly Button btnMenu = Icon("⋮");
 
@@ -94,6 +96,10 @@ namespace RdpPanel
         bool lostAlerted, unreachAlerted, highAlerted;
         int unreachableCount, highCount;
         bool headerDirty = true;
+        bool compact;
+        string lastCompactText = "";
+        DateTime? frozenSince;
+        bool frozenAlerted;
         string lastPingText = "";
         Point dragStart = Point.Empty;
 
@@ -161,6 +167,70 @@ namespace RdpPanel
             get { return rdp != null && rdp.Connected != 0; }
         }
 
+        // notifications of this session are muted (the warning in the panel and the log still work)
+        public bool IsMuted { get { return Config.MutedUntilTicks > DateTime.Now.Ticks; } }
+
+        // the CPU/RAM limits: own value of this session, or the general one from Settings
+        int CpuLimit { get { return Config.CpuWarn > 0 ? Config.CpuWarn : app.CpuWarn; } }
+        int RamLimit { get { return Config.RamWarn > 0 ? Config.RamWarn : app.RamWarn; } }
+
+        string NameText { get { return (Config.Pinned ? "★ " : "") + Config.Name; } }
+
+        void MuteFor(TimeSpan span)
+        {
+            Config.MutedUntilTicks = span <= TimeSpan.Zero ? 0 : DateTime.Now.Add(span).Ticks;
+            RefreshInfo();
+            if (Changed != null) Changed(this);
+        }
+
+        // what this session is doing right now (for the Activity window)
+        public string ActivityState
+        {
+            get
+            {
+                if (IsConnected) return "Connected";
+                switch (state)
+                {
+                    case St.Connecting: return "Connecting";
+                    case St.Retrying: return "Waiting to reconnect";
+                    case St.Stopped: return "Stopped";
+                    case St.Error: return "Error";
+                    case St.NotSet: return "Not set up";
+                    default: return userDisconnected ? "Disconnected by you" : "Offline";
+                }
+            }
+        }
+
+        public string ActivityDetail
+        {
+            get
+            {
+                var l = new List<string>();
+                if (state == St.Retrying || state == St.Stopped || state == St.Error)
+                {
+                    if (!string.IsNullOrEmpty(stateText)) l.Add(stateText);
+                    if (state == St.Retrying && retryCount > 0) l.Add("attempt " + retryCount + " of " + MaxRetries);
+                }
+                else if (state == St.Offline && lastAttempt.HasValue) l.Add("last attempt " + Ago(DateTime.Now - lastAttempt.Value));
+                if (IsConnected && connectedAt.HasValue) l.Add("connected for " + FormatSpan(DateTime.Now - connectedAt.Value));
+                if (IsConnected && frozenSince.HasValue) l.Add("picture unchanged for " + FormatSpan(DateTime.Now - frozenSince.Value));
+                if (!IsConnected && Unreachable) l.Add("PC does not respond");
+                if (!IsConnected && !string.IsNullOrEmpty(lastReason)) l.Add("last reason: " + lastReason);
+                if (IsMuted) l.Add("muted until " + new DateTime(Config.MutedUntilTicks).ToString("HH:mm"));
+                return string.Join("  ·  ", l);
+            }
+        }
+
+        // compact view: only the header (status, CPU and RAM in it); the screen is hidden
+        public void SetCompact(bool on)
+        {
+            if (compact == on) return;
+            compact = on;
+            body.Visible = !on;
+            headerDirty = true;
+            RefreshInfo();
+        }
+
         // short description of the connection state (for the diagnostic file)
         public string DebugState
         {
@@ -205,7 +275,8 @@ namespace RdpPanel
             header.BackColor = Theme.Surface;
             dot.Text = "●";
             lblPing.Text = "";
-            header.Controls.AddRange(new Control[] { dot, lblName, lblHost, btnEditS, chipNote, lblFps, lblPing, btnExpand, btnMenu });
+            header.Controls.AddRange(new Control[] { dot, lblName, lblHost, btnEditS, chipNote, lblFps, lblPing, lblCompact, btnExpand, btnMenu });
+            lblCompact.Visible = false;
             header.Resize += (s, e) => LayoutHeader();
 
             // screen with overlay
@@ -249,6 +320,27 @@ namespace RdpPanel
             menu.Items.Add("Connect / reconnect", null, (s, e) => Reconnect());
             menu.Items.Add("Disconnect", null, (s, e) => Disconnect());
             menu.Items.Add(new ToolStripSeparator());
+            var pinItem = new ToolStripMenuItem("Pin to top", null, (s, e) =>
+            {
+                Config.Pinned = !Config.Pinned;
+                headerDirty = true;
+                RefreshInfo();
+                if (Changed != null) Changed(this);
+                if (LayoutChanged != null) LayoutChanged(this);
+            });
+            var muteItem = new ToolStripMenuItem("Mute notifications of this session");
+            muteItem.DropDownItems.Add("For 1 hour", null, (s, e) => MuteFor(TimeSpan.FromHours(1)));
+            muteItem.DropDownItems.Add("For 8 hours", null, (s, e) => MuteFor(TimeSpan.FromHours(8)));
+            muteItem.DropDownItems.Add("For 24 hours", null, (s, e) => MuteFor(TimeSpan.FromHours(24)));
+            muteItem.DropDownItems.Add("Unmute", null, (s, e) => MuteFor(TimeSpan.Zero));
+            menu.Items.Add(pinItem);
+            menu.Items.Add(muteItem);
+            menu.Opening += (s, e) =>
+            {
+                pinItem.Text = Config.Pinned ? "Unpin from top" : "Pin to top";
+                muteItem.Text = IsMuted ? "Muted until " + new DateTime(Config.MutedUntilTicks).ToString("dd-MM HH:mm") + " (change)" : "Mute notifications of this session";
+            };
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Edit link…", null, (s, e) => EditLink());
             menu.Items.Add("Copy link", null, (s, e) => CopyLink());
             menu.Items.Add("Take screenshot", null, (s, e) => ManualShot());
@@ -276,9 +368,10 @@ namespace RdpPanel
             btnReconnect.Click += (s, e) => Reconnect();
             btnWol.Click += (s, e) => DoWake();
 
-            foreach (var c in new Control[] { header, dot, lblName, lblHost, lblFps, lblPing })
+            foreach (var c in new Control[] { header, dot, lblName, lblHost, lblFps, lblPing, lblCompact })
                 HookHeader(c);
             info.MouseDown += (s, e) => { if (Selected != null) Selected(this); };
+            info.MouseDoubleClick += (s, e) => RaiseFocus();
 
             retryTimer.Tick += (s, e) =>
             {
@@ -325,6 +418,7 @@ namespace RdpPanel
                 }
             };
             c.MouseUp += (s, e) => { dragStart = Point.Empty; };
+            c.DoubleClick += (s, e) => RaiseFocus();   // double-click on the header: show this session large (and back)
         }
 
         void LayoutHeader()
@@ -355,6 +449,15 @@ namespace RdpPanel
                 if (lblFps.Visible) limit = lblFps.Left;
             }
             else lblFps.Visible = false;
+
+            if (compact && lblCompact.Text.Length > 0)
+            {
+                int cw = TextRenderer.MeasureText(lblCompact.Text, lblCompact.Font).Width + 10;
+                lblCompact.SetBounds(limit - cw - 6, 0, cw, h);
+                lblCompact.Visible = lblCompact.Left > lblName.Right + 6;
+                if (lblCompact.Visible) limit = lblCompact.Left;
+            }
+            else lblCompact.Visible = false;
 
             chipNote.Visible = chipNote.Text.Length > 0 && chipNote.Right < limit - 6;
             lblHost.Visible = lblHost.Right < limit - 6;
@@ -665,7 +768,7 @@ namespace RdpPanel
 
         public void ApplyConfig()
         {
-            lblName.Text = Config.Name;
+            lblName.Text = NameText;
             lblHost.Text = Config.Host;
             chipNote.Text = (Config.Note ?? "").Trim();
             Color c;
@@ -697,12 +800,35 @@ namespace RdpPanel
                 LogService.Write(Config.Name, "Notification", msg, 0);
                 Raise(msg);
             }
+
+            // frozen: connected, but the picture has not changed for N minutes (needs the FPS display; an idle desktop looks the same)
+            if (Config.FrozenMinutes > 0 && IsConnected && !double.IsNaN(Fps))
+            {
+                if (Fps > 0) { frozenSince = null; frozenAlerted = false; }
+                else if (!frozenSince.HasValue) frozenSince = DateTime.Now;
+                else if (!frozenAlerted && (DateTime.Now - frozenSince.Value).TotalMinutes >= Config.FrozenMinutes)
+                {
+                    frozenAlerted = true;
+                    string fm = "Session '" + Config.Name + "' looks frozen: the picture has not changed for " + Config.FrozenMinutes + " min."
+                        + (Config.FrozenReconnect ? " Reconnecting." : "");
+                    LogService.Write(Config.Name, "Notification", fm, 0);
+                    Raise(fm);
+                    if (Config.FrozenReconnect)
+                    {
+                        frozenSince = null;
+                        frozenAlerted = false;
+                        Reconnect();
+                    }
+                }
+            }
+            else { frozenSince = null; frozenAlerted = false; }
+
             RefreshInfo();
         }
 
         public void RefreshInfo()
         {
-            lblName.Text = Config.Name;
+            lblName.Text = NameText;
 
             Color sc;
             bool hasColor = Gfx.TryColor(Config.ColorHex, out sc);
@@ -749,8 +875,8 @@ namespace RdpPanel
                 tips.SetToolTip(lblCpuVal, statsTip);
                 tips.SetToolTip(lblRamVal, statsTip);
             }
-            lblCpuVal.ForeColor = !double.IsNaN(Cpu) && Cpu >= app.CpuWarn ? Theme.Bad : Theme.Fg;
-            lblRamVal.ForeColor = !double.IsNaN(Ram) && Ram >= app.RamWarn ? Theme.Bad : Theme.Fg;
+            lblCpuVal.ForeColor = !double.IsNaN(Cpu) && Cpu >= CpuLimit ? Theme.Bad : Theme.Fg;
+            lblRamVal.ForeColor = !double.IsNaN(Ram) && Ram >= RamLimit ? Theme.Bad : Theme.Fg;
 
             // button set: online or not
             bool on = IsConnected;
@@ -794,6 +920,10 @@ namespace RdpPanel
             // ping
             string pt = PingMs >= 0 ? "● " + PingMs + " ms" : "— ms";
             lblPing.ForeColor = PingMs < 0 ? Theme.FgMuted : (PingMs < 50 ? Theme.Good : (PingMs < 150 ? Theme.Warn : Theme.Bad));
+            string ct = compact
+                ? text + (on && !double.IsNaN(Cpu) ? "   CPU " + Cpu.ToString("0") + "%" : "") + (on && !double.IsNaN(Ram) ? "   RAM " + Ram.ToString("0") + "%" : "")
+                : "";
+            if (ct != lastCompactText) { lastCompactText = ct; lblCompact.Text = ct; headerDirty = true; }
             if (pt != lastPingText) { lastPingText = pt; lblPing.Text = pt; headerDirty = true; }
 
             string ft = (!app.ShowFps || !on) ? "" : (double.IsNaN(Fps) ? "– FPS" : Fps.ToString("0") + " FPS");
@@ -1069,8 +1199,8 @@ namespace RdpPanel
 
         void EvaluateLoad()
         {
-            bool cpuHigh = Cpu >= app.CpuWarn;
-            bool ramHigh = Ram >= app.RamWarn;
+            bool cpuHigh = Cpu >= CpuLimit;
+            bool ramHigh = Ram >= RamLimit;
             bool lowMem = FreeMb < app.MinFreeMb;
             if (cpuHigh || ramHigh || lowMem)
             {

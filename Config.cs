@@ -38,6 +38,13 @@ namespace RdpPanel
         public int Width = 1366;
         public int Height = 768;
         public bool AutoConnect = true;
+        public bool Pinned;                 // shown first in the overview
+        public long MutedUntilTicks;        // no Discord/balloon/sound messages for this session until then (0 = not muted)
+        public int CpuWarn;                 // 0 = use the general value from Settings
+        public int RamWarn;                 // 0 = use the general value from Settings
+        public int FrozenMinutes;           // 0 = off; connected but the picture has not changed for this long = frozen
+        public bool FrozenReconnect;        // reconnect by itself when frozen
+        public bool HideInMonitoring;       // not shown on the Monitoring page and in the performance overview
 
         [ScriptIgnore]
         public string Password
@@ -101,6 +108,7 @@ namespace RdpPanel
         public bool LightTheme;
         public string ActiveProfile = "";
         public List<SessionConfig> Sessions = new List<SessionConfig>();
+        public List<AltAccount> Alts = new List<AltAccount>();   // the 'Alt accounts' tab
         public List<Profile> Profiles = new List<Profile>();
 
         // Discord
@@ -117,6 +125,10 @@ namespace RdpPanel
         public string QuietTo = "07:00";
         public int QuietMode;            // 0 = no messages in the quiet hours, 1 = only drops and PCs that stop responding
         public int MaxMsgsPerHour;       // 0 = no limit; above it the messages are held back and summarised
+
+        // overview
+        public int SortMode;             // 0 = my order, 1 = name, 2 = problems first, 3 = CPU high to low, 4 = FPS low to high
+        public bool CompactView;         // small tiles: only the header with status, CPU and RAM
 
         [ScriptIgnore]
         public string WebhookUrl
