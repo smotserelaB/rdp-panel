@@ -110,6 +110,9 @@ namespace RdpPanel
         readonly Label lblWarn = new Label();
         readonly Label lblAlerts = new Label();
         readonly ToggleSwitch swAlerts = new ToggleSwitch();
+        readonly Label lblSound = new Label();
+        readonly ToggleSwitch swSound = new ToggleSwitch();
+        bool syncingSound;
 
         readonly NotifyIcon notify = new NotifyIcon();
         readonly Timer clock = new Timer { Interval = 1000 };
@@ -212,6 +215,7 @@ namespace RdpPanel
                 if (tick % 30 == 5) CheckDailyReport();
                 if (tick % 30 == 12) SendUpdatedMessage();
                 if (tick % 5 == 2) UpdateTrayIcon();
+                if (tick % 600 == 17) pgAlt.SnapshotToday();
                 if (page == 0 && focused == null && (filterMode != 0 || Cfg.SortMode >= 2) && tick % (Cfg.SortMode >= 3 ? 30 : 4) == 1) RearrangeIfChanged();
                 if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
                 if (updateRetryAt != DateTime.MinValue && DateTime.Now >= updateRetryAt) { updateRetryAt = DateTime.MinValue; CheckUpdateAsync(); }
@@ -747,13 +751,31 @@ namespace RdpPanel
                 Cfg.Save();
             };
 
-            footer.Controls.AddRange(new Control[] { lblFootL, lblWarn, lblAlerts, swAlerts });
+            // sound: one switch that turns every sound of the panel off
+            lblSound.AutoSize = false;
+            lblSound.TextAlign = ContentAlignment.MiddleRight;
+            lblSound.ForeColor = Theme.Fg;
+            lblSound.Width = 84;
+            lblSound.Height = 36;
+            swSound.Checked = Cfg.AlertSound;
+            lblSound.Text = Cfg.AlertSound ? "Sound on" : "Sound off";
+            swSound.CheckedChanged += (s, e) =>
+            {
+                if (syncingSound) return;
+                Cfg.AlertSound = swSound.Checked;
+                lblSound.Text = Cfg.AlertSound ? "Sound on" : "Sound off";
+                Cfg.Save();
+            };
+
+            footer.Controls.AddRange(new Control[] { lblFootL, lblWarn, lblSound, swSound, lblAlerts, swAlerts });
             footer.Resize += (s, e) =>
             {
                 swAlerts.Location = new Point(footer.Width - 16 - swAlerts.Width, 6);
                 lblAlerts.Location = new Point(swAlerts.Left - lblAlerts.Width - 6, 0);
+                swSound.Location = new Point(lblAlerts.Left - 18 - swSound.Width, 6);
+                lblSound.Location = new Point(swSound.Left - lblSound.Width - 6, 0);
                 int x = 520;
-                lblWarn.SetBounds(x, 0, Math.Max(0, lblAlerts.Left - x - 12), footer.Height);
+                lblWarn.SetBounds(x, 0, Math.Max(0, lblSound.Left - x - 12), footer.Height);
             };
         }
 
@@ -1594,6 +1616,58 @@ namespace RdpPanel
             int on = Tiles.Count(t => t.Online && !hidden.Contains(t));
             lblFootL.Text = "RDP Panel v" + AppInfo.Version + "   |   " + on + " sessions active   |   Total connected time today: " + UI.Dur(totalToday);
             if (lblWarn.Text.Length > 0 && (DateTime.Now - warnAt).TotalMinutes > 10) lblWarn.Text = "";
+            if (swSound.Checked != Cfg.AlertSound)   // changed in Settings
+            {
+                syncingSound = true;
+                swSound.Checked = Cfg.AlertSound;
+                lblSound.Text = Cfg.AlertSound ? "Sound on" : "Sound off";
+                syncingSound = false;
+            }
+        }
+
+        // a message from the panel itself (not from a session): balloon, and a sound unless the sound is off
+        internal void ShowBalloon(string title, string text)
+        {
+            try
+            {
+                notify.ShowBalloonTip(6000, title, text, ToolTipIcon.Info);
+                if (Cfg.AlertSound) System.Media.SystemSounds.Asterisk.Play();
+            }
+            catch { }
+        }
+
+        // show one session large (from the Alt accounts tab and from the search window)
+        internal void OpenTile(SessionTile t)
+        {
+            SetFocus(t);
+        }
+
+        // Ctrl+K: sessions, pages, alt accounts and a few actions in one list
+        void ShowQuickSearch()
+        {
+            var l = new List<Tuple<string, Action>>();
+            foreach (var t in Tiles.ToList())
+            {
+                var tile = t;
+                l.Add(new Tuple<string, Action>("Session: " + t.Config.Name + "   (" + t.Config.Host + ")", () => OpenTile(tile)));
+            }
+            string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts" };
+            for (int i = 0; i < pages.Length; i++)
+            {
+                int idx = i;
+                l.Add(new Tuple<string, Action>("Go to: " + pages[i], () => ShowPage(idx)));
+            }
+            foreach (var a in Cfg.Alts.ToList())
+            {
+                var alt = a;
+                l.Add(new Tuple<string, Action>("Alt account: " + a.Name + (a.Kind.Length > 0 ? "   (" + a.Kind + ")" : ""), () => { ShowPage(8); pgAlt.ShowAlt(alt); }));
+            }
+            l.Add(new Tuple<string, Action>("Action: " + (Cfg.CompactView ? "Normal view (not compact)" : "Compact view"), () => { Cfg.CompactView = !Cfg.CompactView; Cfg.Save(); UpdateCompactButton(); ArrangeTiles(); }));
+            l.Add(new Tuple<string, Action>("Action: Open the activity window", ShowActivity));
+            l.Add(new Tuple<string, Action>("Action: " + (Cfg.AlertSound ? "Turn sound off" : "Turn sound on"), () => { swSound.Checked = !swSound.Checked; }));
+            l.Add(new Tuple<string, Action>("Action: " + (Cfg.DiscordPaused ? "Resume Discord messages" : "Pause all Discord messages"), () => { Cfg.DiscordPaused = !Cfg.DiscordPaused; Cfg.Save(); }));
+            l.Add(new Tuple<string, Action>("Action: Show all sessions (clear the filter)", () => { cmbFilter.SelectedIndex = 0; txtSearch.Text = ""; }));
+            using (var f = new QuickSearchForm(l)) f.ShowDialog(this);
         }
 
         void RebuildPerf()
@@ -1952,6 +2026,7 @@ namespace RdpPanel
         {
             if (keyData == Keys.F11) { ToggleFullscreen(); return true; }
             if (keyData == Keys.F1) { ShowPage(6); return true; }
+            if (keyData == (Keys.Control | Keys.K)) { ShowQuickSearch(); return true; }
             if (keyData == Keys.Escape && fullscreen) { ToggleFullscreen(); return true; }
             if (keyData == (Keys.Control | Keys.D0)) { SetFocus(null); return true; }
             if (keyData >= (Keys.Control | Keys.D1) && keyData <= (Keys.Control | Keys.D9))

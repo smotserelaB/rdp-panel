@@ -45,6 +45,7 @@ namespace RdpPanel
         public int FrozenMinutes;           // 0 = off; connected but the picture has not changed for this long = frozen
         public bool FrozenReconnect;        // reconnect by itself when frozen
         public bool HideInMonitoring;       // not shown on the Monitoring page and in the performance overview
+        public string AltId = "";           // the alt account (Alt accounts tab) that plays on this session
 
         [ScriptIgnore]
         public string Password
@@ -128,6 +129,7 @@ namespace RdpPanel
 
         // overview
         public int SortMode;             // 0 = my order, 1 = name, 2 = problems first, 3 = CPU high to low, 4 = FPS low to high
+        public int AltSort;              // sort of the Alt accounts tab: 0 = my order, 1 = name, 2 = kind, 3.. = most of an item
         public bool CompactView;         // small tiles: only the header with status, CPU and RAM
 
         [ScriptIgnore]

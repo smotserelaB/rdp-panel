@@ -89,6 +89,7 @@ namespace RdpPanel
         string lastReason = "";
         bool userDisconnected = true;
         bool reconnectPending;
+        bool connectWhenReady;   // Connect() was asked while the control had no window handle yet
         int retryCount;
         DateTime? connectedAt;
         DateTime? lostAt;
@@ -164,7 +165,14 @@ namespace RdpPanel
 
         bool IsConnected
         {
-            get { return rdp != null && rdp.Connected != 0; }
+            get
+            {
+                // The ActiveX object only exists once the control has a window handle
+                // (e.g. not while the panel is started hidden/minimised). Reading Connected
+                // before that throws InvalidActiveXStateException.
+                try { return rdp != null && rdp.IsHandleCreated && rdp.Connected != 0; }
+                catch (InvalidOperationException) { return false; }
+            }
         }
 
         // notifications of this session are muted (the warning in the panel and the log still work)
@@ -508,6 +516,14 @@ namespace RdpPanel
             screen.Controls.Add(rdp);
             rdp.BringToFront();
 
+            // when the control gets its handle later (window becomes visible), finish the pending connect
+            rdp.HandleCreated += (s, e) =>
+            {
+                if (!connectWhenReady) return;
+                connectWhenReady = false;
+                BeginInvoke(new Action(Connect));
+            };
+
             rdp.OnConnected += (s, e) =>
             {
                 retryCount = 0;
@@ -590,6 +606,15 @@ namespace RdpPanel
             {
                 EnsureRdp();
                 if (!rdp.IsHandleCreated) rdp.CreateControl();
+                if (!rdp.IsHandleCreated)
+                {
+                    // no window handle yet (panel hidden): connect as soon as it gets one
+                    connectWhenReady = true;
+                    state = St.Connecting;
+                    RefreshInfo();
+                    return;
+                }
+                connectWhenReady = false;
                 if (rdp.Connected != 0) return;
 
                 userDisconnected = false;
@@ -639,6 +664,7 @@ namespace RdpPanel
         {
             userDisconnected = true;
             reconnectPending = false;
+            connectWhenReady = false;
             retryTimer.Stop();
             retryCount = 0;
             lostAt = null;
