@@ -87,4 +87,15 @@ Above the tiles you choose what to show (all, problems, offline, connected) and 
 In the session settings (the pencil on a tile) you can set a CPU and RAM warning level for that session only, switch on the frozen warning (the picture has not changed for N minutes, with an optional automatic reconnect) and choose whether the session is shown on the Monitoring page. On the Monitoring page the Remove button takes a session off the page; Show all again brings them back.
 
 Alt accounts
-The tab Alt accounts is for your Bee Swarm alts. Add one with the button, then fill in the name, the kind of alt and the numbers. Everything is saved by itself. For the hive picture use Choose, Paste (a screenshot from the clipboard) or drop a file on the picture; click the picture to see it large.
+The tab Alt accounts is for your Bee Swarm alts. Add one with the button, then fill in the name, the kind of alt and the numbers. Everything is saved by itself.
+- Use - and + next to a number (the Step box sets how much). The mouse wheel does not change numbers; it scrolls the list.
+- Session of this alt: choose the RDP session that plays this alt. You see if it is online and Go to opens it large.
+- Goal: put a number in the target box under an item; a line shows the progress and you get a message when you reach it.
+- History: the panel saves your numbers once a day. The History button shows a chart per item and what changed today, this week and this month.
+- Search, sort and the arrow to collapse a card keep a long list manageable.
+- Export CSV and Import CSV: a file with all numbers, goals, notes and sessions. Import updates an alt with the same name and adds the others.
+- Backup and Restore: a zip with everything, including the hive pictures, the history and the links to sessions.
+- For the hive picture use Choose, Paste (a screenshot from the clipboard) or drop a file on the picture; click the picture to see it large.
+
+Sound and search
+The switch Sound on/off in the bar at the bottom turns all sounds of the panel off. Ctrl+K opens a search window for sessions, pages, alt accounts and a few actions (compact view, activity window, sound, pause Discord).
