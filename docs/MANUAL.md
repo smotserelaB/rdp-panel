@@ -105,3 +105,12 @@ The switch Sound on/off in the bar at the bottom mutes the whole panel in the Wi
 
 Removing a session from a list
 A session can be taken out of the Performance overview (the x on its card or right-click), the Daily summary (right-click) and PC management (the button Remove from this list, or right-click). The session keeps running and is still in the Discord report. The same right-click menu shows the removed sessions again, and in the session settings you can choose where a session is shown.
+
+Health, getting started and more (1.5.0)
+The page Health lists everything that needs attention (a session that dropped, a PC that does not respond, a frozen session, high CPU or memory, the Discord bot or webhook, a new version) with a short explanation and a button to fix it. The number next to Health in the list shows how many things need attention.
+The card Getting started on the overview shows the first steps and hides itself when they are done.
+Duplicate this session (in the menu of a tile) makes a copy with a new name. Edit several... changes the same setting of many sessions at once.
+A profile can switch by itself: Profiles, Schedule... chooses the days and the times. At the start time the panel switches to that profile once; if you choose another profile yourself it stays until the next switch.
+Settings has Export settings and Import settings: a file with your sessions, profiles and settings, without passwords, webhook link and bot token. Importing updates sessions with the same name and adds the new ones.
+The Daily summary has a column Yesterday.
+Shortcuts: Ctrl+K search everything, Ctrl+N add a session, Ctrl+F search the sessions, F5 reconnect the selected session, Ctrl+M sound on/off, Ctrl+Shift+C compact view, Ctrl+L the log, Ctrl+H Health.
