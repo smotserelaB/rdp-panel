@@ -102,6 +102,10 @@ namespace RdpPanel
         public int Columns = 2;
         public bool GroupByHost;
         public List<string> Sessions = new List<string>();   // names of the sessions that are visible
+        public bool ScheduleOn;              // switch to this profile by itself
+        public string ScheduleFrom = "08:00";
+        public string ScheduleTo = "18:00";
+        public int ScheduleDays = 127;       // bit 0 = Sunday ... bit 6 = Saturday
     }
 
     public class AppConfig
@@ -131,6 +135,8 @@ namespace RdpPanel
 
         // overview
         public int SortMode;             // 0 = my order, 1 = name, 2 = problems first, 3 = CPU high to low, 4 = FPS low to high
+        public bool ChecklistHidden;     // the 'Getting started' card on the overview
+        public bool EverConnected;       // a session was connected at least once (for that card)
         public int AltSort;              // sort of the Alt accounts tab: 0 = my order, 1 = name, 2 = kind, 3.. = most of an item
         public bool CompactView;         // small tiles: only the header with status, CPU and RAM
 

@@ -38,6 +38,7 @@ The program is not digitally signed, so Windows SmartScreen or a virus scanner m
 - Overview grid (adjustable columns), group per PC, search, drag to rearrange.
 - Per tile: live screen, status, time, CPU/RAM with a small chart, ping, own color and label.
 - Notifications for drops, unreachable PCs and high CPU/RAM (Windows notification, sound, optional Discord).
+- **Health** page, getting-started card, duplicate session, edit several sessions, profiles on a schedule, export/import of the settings, yesterday in the Daily summary, more shortcuts.
 - **Alt accounts** tab (Bee Swarm alts with their items, goals, history, a hive picture, CSV export/import and backup); Ctrl+K search; one switch for all sound; overview filter and sort, pin, mute per session, compact view, activity window, colored tray icon, frozen-session warning, own CPU/RAM levels per session.
 - **Rules for Discord messages**: pause all, quiet hours, maximum per hour (Settings).
 - Screenshot of the whole panel; screenshot on a drop; Discord webhook for drops, manually and every N minutes.

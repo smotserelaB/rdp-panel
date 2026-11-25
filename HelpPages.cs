@@ -36,7 +36,7 @@ namespace RdpPanel
                 .B("**Tile header:** name, host, label, FPS and ping. Drag the header onto another tile to swap places. The **⋮** menu (or right-click) has large view, connect/disconnect, screenshot, Wake-on-LAN, restart/shut down and settings.")
                 .B("**⤢** shows one tile large; press **Back to overview** to return.")
                 .B("**Columns**, **Group by PC** and the **search box** change what you see. **Profiles** remember a selection of sessions with its layout.")
-                .B("**F11** = full screen (move the mouse to the top edge to bring the top bar back). **Ctrl+1 … Ctrl+9** = show that session large, **Ctrl+0** = back. **F1** = this help.")
+                .B("**F11** = full screen (move the mouse to the top edge to bring the top bar back). **Ctrl+1 … Ctrl+9** = show that session large, **Ctrl+0** = back. **F1** = this help. **Ctrl+K** = search everything, **Ctrl+N** = add a session, **Ctrl+F** = search the sessions, **F5** = reconnect the selected session, **Ctrl+M** = sound on/off, **Ctrl+Shift+C** = compact view, **Ctrl+L** = the log, **Ctrl+H** = Health.")
                 .B("The strip at the bottom shows performance, today's connected time, the latest log lines and quick PC actions."),
 
             new HelpTopic { Title = "FPS" }

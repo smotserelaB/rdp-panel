@@ -305,6 +305,7 @@ namespace RdpPanel
             lv.Columns.Add("Sessions", 100);
             lv.Columns.Add("Columns", 100);
             lv.Columns.Add("Group by PC", 140);
+            lv.Columns.Add("Schedule", 220);
             lv.Dock = DockStyle.Fill;
 
             var bar = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Theme.Bg };
@@ -312,6 +313,7 @@ namespace RdpPanel
             Add(bar, "Save current view…", ref x, 200, () => main.SaveCurrentAsProfile());
             Add(bar, "Apply", ref x, 110, () => { var p = Sel(); if (p != null) main.ApplyProfile(p); });
             Add(bar, "Show all sessions", ref x, 150, () => main.ApplyProfile(null));
+            Add(bar, "Schedule…", ref x, 120, () => { var p = Sel(); if (p != null) main.EditSchedule(p); });
             Add(bar, "Remove", ref x, 110, () => { var p = Sel(); if (p != null) main.DeleteProfile(p); }).ForeColor = Theme.Bad;
 
             Controls.Add(lv);
@@ -343,6 +345,7 @@ namespace RdpPanel
                 it.SubItems.Add(p.Sessions.Count.ToString());
                 it.SubItems.Add(p.Columns.ToString());
                 it.SubItems.Add(p.GroupByHost ? "yes" : "no");
+                it.SubItems.Add(MainForm.ScheduleText(p));
                 lv.Items.Add(it);
             }
             lv.EndUpdate();
@@ -593,6 +596,16 @@ namespace RdpPanel
             y += 40;
             UI.Lbl(box, "You have v" + AppInfo.Version + ". \"Check now\" works even when the automatic check is off. With the installer version the panel can download and install the update itself.", 0, y, 760, true).Font = Theme.UI(8.25f);
             y += 40;
+
+            UI.Lbl(box, "Export and import settings", 0, y, 400, false).Font = Theme.UI(10.5f, FontStyle.Bold);
+            y += 28;
+            UI.Lbl(box, "Save your sessions, profiles and settings to a file (without passwords and tokens) or load them from a file, for example on a new PC.", 0, y, 760, true);
+            y += 30;
+            var btnExp = UI.Btn(box, "Export settings…", 0, y, 170, false);
+            btnExp.Click += (s, e) => main.ExportSettings();
+            var btnImp = UI.Btn(box, "Import settings…", 180, y, 170, false);
+            btnImp.Click += (s, e) => main.ImportSettings();
+            y += 50;
 
             UI.Lbl(box, "Diagnostics", 0, y, 300, false).Font = Theme.UI(10.5f, FontStyle.Bold);
             y += 28;

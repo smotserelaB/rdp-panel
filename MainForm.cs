@@ -76,6 +76,10 @@ namespace RdpPanel
         readonly Panel strip = new Panel();
         MonitoringPage pgMon;
         AltPage pgAlt;
+        HealthPage pgHealth;
+        string lastScheduled;                 // the profile the schedule asked for last time (null = not looked yet)
+        readonly Panel checkHost = new Panel();
+        readonly Label lblCheck = new Label();
         int filterMode;                    // overview filter: 0 all, 1 problems, 2 offline, 3 connected
         readonly ComboBox cmbFilter = new ComboBox();
         readonly ComboBox cmbSort = new ComboBox();
@@ -156,6 +160,7 @@ namespace RdpPanel
 
             pgMon = new MonitoringPage(this);
             pgAlt = new AltPage(this);
+            pgHealth = new HealthPage(this);
             pgLog = new LogPage(this);
             pgPc = new PcPage(this);
             pgProf = new ProfilesPage(this);
@@ -170,7 +175,7 @@ namespace RdpPanel
 
             content.Dock = DockStyle.Fill;
             content.BackColor = Theme.Bg;
-            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits, pgAlt })
+            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits, pgAlt, pgHealth })
             {
                 p.Dock = DockStyle.Fill;
                 p.Visible = false;
@@ -218,6 +223,8 @@ namespace RdpPanel
                 if (tick % 30 == 12) SendUpdatedMessage();
                 if (tick % 5 == 2) UpdateTrayIcon();
                 if (tick % 5 == 3) ApplySound();
+                if (tick % 5 == 4) { UpdateHealthBadge(); UpdateChecklist(); }
+                if (tick % 20 == 7) CheckProfileSchedule();
                 if (tick % 600 == 17) pgAlt.SnapshotToday();
                 if (page == 0 && focused == null && (filterMode != 0 || Cfg.SortMode >= 2) && tick % (Cfg.SortMode >= 3 ? 30 : 4) == 1) RearrangeIfChanged();
                 if (tick == 10 || tick % 21600 == 10) CheckUpdateAsync();   // 10 s after start, then every 6 hours
@@ -557,9 +564,10 @@ namespace RdpPanel
             rows.Controls.AddRange(new Control[] { lt, swTheme, lf, chipF });
 
             // navigation
-            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts" };
+            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts", "✚  Health" };
             // the page numbers stay as they are; this is where each one is shown in the list (Alt accounts under PC management)
-            int[] slot = { 0, 1, 2, 3, 5, 6, 7, 8, 4 };
+            // order on the screen: Overview, Monitoring, Health, Log, PC management, Alt accounts, Profiles, Settings, Help, Credits
+            int[] slot = { 0, 1, 3, 4, 6, 7, 8, 9, 5, 2 };
             var navPanel = new Panel { Dock = DockStyle.Top, Height = names.Length * 44 + 14, BackColor = Theme.Surface };
             for (int i = 0; i < names.Length; i++)
             {
@@ -621,6 +629,7 @@ namespace RdpPanel
             lvSum.Columns.Add("Session", 130);
             lvSum.Columns.Add("Connected time", 110);
             lvSum.Columns.Add("Status", 90);
+            lvSum.Columns.Add("Yesterday", 90);
             cardSum.Body.Controls.Add(lvSum);
             lvSum.ContextMenuStrip = MakePlaceMenu(1, "the Daily summary", lvSum);
 
@@ -681,14 +690,20 @@ namespace RdpPanel
             var btnActivity = Theme.MakeButton("Activity");
             btnActivity.Margin = new Padding(0, 0, 10, 0);
             btnActivity.Click += (s, e) => ShowActivity();
+            var btnMulti = Theme.MakeButton("Edit several…");
+            btnMulti.Margin = new Padding(0, 0, 10, 0);
+            btnMulti.Click += (s, e) => EditSeveral();
             barFlow.Controls.Add(Lab("Show:", 46));
             barFlow.Controls.Add(cmbFilter);
             barFlow.Controls.Add(Lab("Sort:", 40));
             barFlow.Controls.Add(cmbSort);
             barFlow.Controls.Add(btnCompact);
             barFlow.Controls.Add(btnActivity);
+            barFlow.Controls.Add(btnMulti);
             bar.Controls.Add(barFlow);
-            pgOverview.Controls.Add(bar);   // added last: docks above the tiles
+            pgOverview.Controls.Add(bar);   // docks above the tiles
+            BuildChecklist();
+            pgOverview.Controls.Add(checkHost);   // added last: above the toolbar
         }
 
         void UpdateCompactButton()
@@ -799,6 +814,7 @@ namespace RdpPanel
             pgHelp.Visible = idx == 6;
             pgCredits.Visible = idx == 7;
             pgAlt.Visible = idx == 8;
+            pgHealth.Visible = idx == 9;
 
             for (int i = 0; i < nav.Count; i++)
             {
@@ -815,6 +831,7 @@ namespace RdpPanel
             else if (idx == 4) pgProf.RefreshData();
             else if (idx == 5) pgSet.Load();
             else if (idx == 8) pgAlt.Rebuild();
+            else if (idx == 9) pgHealth.Rebuild();
         }
 
         // ---------------------------------------------------------------- tiles
@@ -824,6 +841,7 @@ namespace RdpPanel
             var t = new SessionTile(sc, Cfg);
             t.FocusRequested += tl => SetFocus(focused == tl ? null : tl);
             t.EditRequested += EditSession;
+            t.DuplicateRequested += DuplicateSession;
             t.Selected += SelectTile;
             t.Changed += tl => Cfg.Save();
             t.AlertRaised += OnAlert;
@@ -989,7 +1007,7 @@ namespace RdpPanel
 
         // ---------------------------------------------------------------- managing sessions
 
-        void AddSession()
+        internal void AddSession()
         {
             var sc = new SessionConfig { Name = "Session " + (Cfg.Sessions.Count + 1) };
             using (var dlg = new SessionDialog(sc, false))
@@ -1017,7 +1035,7 @@ namespace RdpPanel
             if (p != null && !p.Sessions.Contains(name)) p.Sessions.Add(name);
         }
 
-        void EditSession(SessionTile t)
+        internal void EditSession(SessionTile t)
         {
             DialogResult r;
             string oldName = t.Config.Name;
@@ -1320,6 +1338,258 @@ namespace RdpPanel
                 if (err != null) return err;
             }
             return null;
+        }
+
+        // ---------------------------------------------------------------- 1.5.0: duplicate, schedule, health, checklist, settings file
+
+        void DuplicateSession(SessionTile t)
+        {
+            try
+            {
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var copy = ser.Deserialize<SessionConfig>(ser.Serialize(t.Config));
+                string baseName = t.Config.Name + " (copy)";
+                string name = baseName;
+                int n = 2;
+                while (Cfg.Sessions.Any(x => x.Name == name)) name = baseName + " " + n++;
+                copy.Name = name;
+                copy.AltId = "";
+                copy.Pinned = false;
+                copy.MutedUntilTicks = 0;
+                AddConfigured(copy, false);
+            }
+            catch (Exception ex) { ErrorLog.Write("duplicate session", ex); }
+        }
+
+        // ----- profile on a schedule -----
+
+        internal static string ScheduleText(Profile p)
+        {
+            if (!p.ScheduleOn) return "–";
+            string[] d = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+            var on = new List<string>();
+            foreach (int i in new[] { 1, 2, 3, 4, 5, 6, 0 }) if ((p.ScheduleDays & (1 << i)) != 0) on.Add(d[i]);
+            string days = on.Count == 7 ? "every day" : on.Count == 5 && (p.ScheduleDays & 1) == 0 && (p.ScheduleDays & 64) == 0 ? "Mon–Fri" : string.Join(" ", on);
+            return days + "  " + p.ScheduleFrom + "–" + p.ScheduleTo;
+        }
+
+        internal void EditSchedule(Profile p)
+        {
+            using (var d = new ScheduleDialog(p))
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                Cfg.Save();
+                lastScheduled = null;   // look again at the next check
+                pgProf.RefreshData();
+            }
+        }
+
+        static bool InWindow(Profile p, DateTime now)
+        {
+            TimeSpan from, to;
+            if (!TimeSpan.TryParse(p.ScheduleFrom, System.Globalization.CultureInfo.InvariantCulture, out from)) return false;
+            if (!TimeSpan.TryParse(p.ScheduleTo, System.Globalization.CultureInfo.InvariantCulture, out to)) return false;
+            if (from == to) return false;
+            var t = now.TimeOfDay;
+            Func<DateTime, bool> dayOn = d => (p.ScheduleDays & (1 << (int)d.DayOfWeek)) != 0;
+            if (from < to) return t >= from && t < to && dayOn(now);
+            return (t >= from && dayOn(now)) || (t < to && dayOn(now.AddDays(-1)));   // runs over midnight
+        }
+
+        // switches to a scheduled profile when its time starts (once; a profile you choose yourself stays)
+        void CheckProfileSchedule()
+        {
+            try
+            {
+                var now = DateTime.Now;
+                Profile hit = null;
+                foreach (var p in Cfg.Profiles) if (p.ScheduleOn && InWindow(p, now)) { hit = p; break; }
+                string name = hit == null ? "" : hit.Name;
+                if (name == lastScheduled) return;
+                lastScheduled = name;
+                if (hit != null && Cfg.ActiveProfile != hit.Name)
+                {
+                    ApplyProfile(hit);
+                    LogService.Write("", "Profile", "the schedule switched to profile '" + hit.Name + "'", 0);
+                }
+            }
+            catch (Exception ex) { ErrorLog.Write("profile schedule", ex); }
+        }
+
+        // ----- edit several sessions at once -----
+
+        internal void EditSeveral()
+        {
+            if (Tiles.Count == 0) return;
+            using (var d = new MultiEditDialog(Cfg.Sessions.ToList()))
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                foreach (var t in Tiles) t.ApplyConfig();
+                Cfg.Save();
+                RebuildPerf();
+                RefreshSummary();
+                pgPc.RefreshData();
+                ArrangeTiles();
+            }
+        }
+
+        // ----- health page and getting-started card -----
+
+        internal void SetSound(bool on) { swSound.Checked = on; }
+
+        internal void SetNotifications(bool on)
+        {
+            swAlerts.Checked = on;
+        }
+
+        internal void ShowUpdate()
+        {
+            if (pendingUpdate != null) ShowUpdateDialog(pendingUpdate);
+        }
+
+        void UpdateHealthBadge()
+        {
+            try
+            {
+                int n = HealthPage.Collect(this).Count(i => i.Level >= 1);
+                if (nav.Count > 9) nav[9].Text = "✚  Health" + (n > 0 ? "  (" + n + ")" : "");
+            }
+            catch { }
+        }
+
+        void BuildChecklist()
+        {
+            checkHost.Dock = DockStyle.Top;
+            checkHost.Height = 84;
+            checkHost.BackColor = Theme.Bg;
+            checkHost.Padding = new Padding(8, 8, 8, 0);
+            var card = new RoundedPanel { Dock = DockStyle.Fill };
+            card.Controls.Add(new Label { Text = "Getting started", Font = Theme.UI(10.5f, FontStyle.Bold), ForeColor = Theme.Fg, AutoSize = true, Location = new Point(16, 10), BackColor = Color.Transparent });
+            lblCheck.AutoSize = false;
+            lblCheck.Location = new Point(16, 38);
+            lblCheck.Size = new Size(900, 28);
+            lblCheck.ForeColor = Theme.FgMuted;
+            lblCheck.BackColor = Color.Transparent;
+            lblCheck.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            card.Controls.Add(lblCheck);
+            var hide = UI.Btn(card, "Hide", 0, 8, 80, false);
+            hide.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            card.Resize += (s, e) => hide.Left = card.Width - hide.Width - 14;
+            hide.Click += (s, e) => { Cfg.ChecklistHidden = true; Cfg.Save(); checkHost.Visible = false; };
+            checkHost.Controls.Add(card);
+            checkHost.Visible = !Cfg.ChecklistHidden;
+        }
+
+        void UpdateChecklist()
+        {
+            if (!checkHost.Visible) return;
+            if (Tiles.Any(t => t.Online)) Cfg.EverConnected = true;
+            bool a = Cfg.Sessions.Count > 0;
+            bool b = Cfg.EverConnected;
+            bool c = Discord.IsValid(Cfg.WebhookUrl) || (Cfg.BotEnabled && !string.IsNullOrWhiteSpace(Cfg.BotToken));
+            bool d = Cfg.Profiles.Count > 0;
+            Func<bool, string, string> m = (ok, text) => (ok ? "✓  " : "○  ") + text;
+            lblCheck.Text = m(a, "Add a session") + "      " + m(b, "Connect to it") + "      " + m(c, "Set up Discord (webhook or bot)") + "      " + m(d, "Save a profile (optional)");
+            if (a && b && c)   // the three main steps are done: this card is no longer needed
+            {
+                Cfg.ChecklistHidden = true;
+                Cfg.Save();
+                checkHost.Visible = false;
+            }
+        }
+
+        // ----- export and import of the settings (without passwords and tokens) -----
+
+        internal void ExportSettings()
+        {
+            using (var sfd = new SaveFileDialog { Title = "Export settings", Filter = "Settings file|*.json", FileName = "rdp-panel-settings-" + DateTime.Now.ToString("yyyyMMdd") + ".json" })
+            {
+                if (sfd.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                    var copy = ser.Deserialize<AppConfig>(ser.Serialize(Cfg));
+                    copy.WebhookEnc = "";
+                    copy.BotTokenEnc = "";
+                    copy.Alts = new List<AltAccount>();   // the alt accounts have their own backup
+                    foreach (var sc in copy.Sessions) { sc.PasswordEnc = ""; sc.AdminPassEnc = ""; sc.AltId = ""; }
+                    System.IO.File.WriteAllText(sfd.FileName, ser.Serialize(copy), new System.Text.UTF8Encoding(true));
+                    MessageBox.Show(this, "Saved: " + sfd.FileName + "\r\nPasswords, the webhook link and the bot token are not in this file.", "Export settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex) { MessageBox.Show(this, "Export failed: " + ex.Message, "Export settings", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            }
+        }
+
+        internal void ImportSettings()
+        {
+            using (var ofd = new OpenFileDialog { Title = "Import settings", Filter = "Settings file|*.json|All files|*.*" })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                    var imp = ser.Deserialize<AppConfig>(System.IO.File.ReadAllText(ofd.FileName, System.Text.Encoding.UTF8));
+                    if (imp == null || imp.Sessions == null)
+                    {
+                        MessageBox.Show(this, "This is not a settings file of RDP Panel.", "Import settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    if (MessageBox.Show(this, "Import " + imp.Sessions.Count + " session(s), " + imp.Profiles.Count + " profile(s) and the settings?\r\nSessions with the same name are updated (their passwords stay as they are here), the others are added.\r\nYour webhook link and bot token are not changed.",
+                        "Import settings", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+                    var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+                    // simple settings (numbers, yes/no, text), not the secrets and not the lists
+                    foreach (var f in typeof(AppConfig).GetFields(flags))
+                    {
+                        if (f.Name.EndsWith("Enc") || f.Name == "ActiveProfile" || f.Name == "LastSeenVersion" || f.Name == "UpdateMsgSentFor" || f.Name == "SkippedVersion" || f.Name == "TutorialDone") continue;
+                        if (!(f.FieldType.IsPrimitive || f.FieldType == typeof(string))) continue;
+                        f.SetValue(Cfg, f.GetValue(imp));
+                    }
+                    // sessions: update by name, add the new ones
+                    int added = 0, updated = 0;
+                    foreach (var isc in imp.Sessions)
+                    {
+                        var mine = Cfg.Sessions.FirstOrDefault(x => x.Name == isc.Name);
+                        if (mine == null)
+                        {
+                            isc.PasswordEnc = "";
+                            isc.AdminPassEnc = "";
+                            isc.AltId = "";
+                            Cfg.Sessions.Add(isc);
+                            CreateTile(isc);
+                            added++;
+                        }
+                        else
+                        {
+                            foreach (var f in typeof(SessionConfig).GetFields(flags))
+                            {
+                                if (f.Name == "PasswordEnc" || f.Name == "AdminPassEnc" || f.Name == "AltId") continue;
+                                f.SetValue(mine, f.GetValue(isc));
+                            }
+                            updated++;
+                        }
+                    }
+                    foreach (var ip in imp.Profiles)
+                    {
+                        var mp = Cfg.Profiles.FirstOrDefault(x => x.Name == ip.Name);
+                        if (mp == null) Cfg.Profiles.Add(ip);
+                        else
+                        {
+                            mp.Sessions = ip.Sessions; mp.Columns = ip.Columns; mp.GroupByHost = ip.GroupByHost;
+                            mp.ScheduleOn = ip.ScheduleOn; mp.ScheduleFrom = ip.ScheduleFrom; mp.ScheduleTo = ip.ScheduleTo; mp.ScheduleDays = ip.ScheduleDays;
+                        }
+                    }
+                    foreach (var t in Tiles) t.ApplyConfig();
+                    Cfg.Save();
+                    RebuildPerf();
+                    RefreshSummary();
+                    pgPc.RefreshData();
+                    pgProf.RefreshData();
+                    ArrangeTiles();
+                    MessageBox.Show(this, added + " session(s) added, " + updated + " updated.\r\nSome settings (like the theme) apply after you restart the panel.", "Import settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex) { MessageBox.Show(this, "Import failed: " + ex.Message, "Import settings", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            }
         }
 
         // ---------------------------------------------------------------- tray icon with the status color
@@ -1760,7 +2030,7 @@ namespace RdpPanel
                 var tile = t;
                 l.Add(new Tuple<string, Action>("Session: " + t.Config.Name + "   (" + t.Config.Host + ")", () => OpenTile(tile)));
             }
-            string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts" };
+            string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts", "Health" };
             for (int i = 0; i < pages.Length; i++)
             {
                 int idx = i;
@@ -1848,7 +2118,9 @@ namespace RdpPanel
         void RefreshSummary()
         {
             var today = DateTime.Today;
-            var te = LogService.ReadAll().Where(e => e.Time.Date == today).ToList();
+            var allEvents = LogService.ReadAll();
+            var te = allEvents.Where(e => e.Time.Date == today).ToList();
+            var yesterdayEvents = allEvents.Where(e => e.Time.Date == today.AddDays(-1)).ToList();
             cardSum.Title.Text = "Daily summary (" + today.ToString("dd-MM-yyyy") + ")";
 
             int total = 0;
@@ -1867,6 +2139,9 @@ namespace RdpPanel
                 string st = t.StatusLabel;
                 var sub = it.SubItems.Add(st);
                 sub.ForeColor = st == "Good" ? Theme.Good : st == "Dropped" ? Theme.Warn : Theme.FgMuted;
+                int ySecs = yesterdayEvents.Where(e => e.Session == t.Config.Name && e.Event == "Disconnected").Sum(e => e.Seconds);
+                var ysub = it.SubItems.Add(ySecs > 0 ? UI.Dur(ySecs) : "–");
+                ysub.ForeColor = Theme.FgMuted;
                 lvSum.Items.Add(it);
             }
             if (hiddenCount > 0)
@@ -1875,12 +2150,14 @@ namespace RdpPanel
                 hi.ForeColor = Theme.FgMuted;
                 hi.SubItems.Add("");
                 hi.SubItems.Add("");
+                hi.SubItems.Add("");
                 lvSum.Items.Add(hi);
             }
             if (removedCount > 0)
             {
                 var ri = new ListViewItem(removedCount + " removed (right-click to show again)") { UseItemStyleForSubItems = false };
                 ri.ForeColor = Theme.FgMuted;
+                ri.SubItems.Add("");
                 ri.SubItems.Add("");
                 ri.SubItems.Add("");
                 lvSum.Items.Add(ri);
@@ -2174,6 +2451,13 @@ namespace RdpPanel
             if (keyData == Keys.F11) { ToggleFullscreen(); return true; }
             if (keyData == Keys.F1) { ShowPage(6); return true; }
             if (keyData == (Keys.Control | Keys.K)) { ShowQuickSearch(); return true; }
+            if (keyData == (Keys.Control | Keys.N)) { AddSession(); return true; }
+            if (keyData == (Keys.Control | Keys.F)) { ShowPage(0); txtSearch.Focus(); txtSearch.SelectAll(); return true; }
+            if (keyData == Keys.F5 && SelectedTile != null) { SelectedTile.Reconnect(); return true; }
+            if (keyData == (Keys.Control | Keys.M)) { swSound.Checked = !swSound.Checked; return true; }
+            if (keyData == (Keys.Control | Keys.Shift | Keys.C)) { Cfg.CompactView = !Cfg.CompactView; Cfg.Save(); UpdateCompactButton(); ArrangeTiles(); return true; }
+            if (keyData == (Keys.Control | Keys.L)) { ShowPage(2); return true; }
+            if (keyData == (Keys.Control | Keys.H)) { ShowPage(9); return true; }
             if (keyData == Keys.Escape && fullscreen) { ToggleFullscreen(); return true; }
             if (keyData == (Keys.Control | Keys.D0)) { SetFocus(null); return true; }
             if (keyData >= (Keys.Control | Keys.D1) && keyData <= (Keys.Control | Keys.D9))

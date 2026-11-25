@@ -27,6 +27,7 @@ namespace RdpPanel
         public event Action<SessionTile, string> AlertRaised;
         public event Action<SessionTile, string> Dropped;   // unexpected drop (with the reason)
         public event Action<SessionTile, SessionTile> ReorderRequested;
+        public event Action<SessionTile> DuplicateRequested;
         public event Action<SessionTile> LayoutChanged;   // pinned or unpinned: the overview has to be arranged again
 
         // ---- header ----
@@ -176,11 +177,14 @@ namespace RdpPanel
         }
 
         // notifications of this session are muted (the warning in the panel and the log still work)
+        // seconds the picture has not changed (0 = not frozen or not measured)
+        public int FrozenSeconds { get { return IsConnected && frozenSince.HasValue ? (int)(DateTime.Now - frozenSince.Value).TotalSeconds : 0; } }
+
         public bool IsMuted { get { return Config.MutedUntilTicks > DateTime.Now.Ticks; } }
 
         // the CPU/RAM limits: own value of this session, or the general one from Settings
-        int CpuLimit { get { return Config.CpuWarn > 0 ? Config.CpuWarn : app.CpuWarn; } }
-        int RamLimit { get { return Config.RamWarn > 0 ? Config.RamWarn : app.RamWarn; } }
+        internal int CpuLimit { get { return Config.CpuWarn > 0 ? Config.CpuWarn : app.CpuWarn; } }
+        internal int RamLimit { get { return Config.RamWarn > 0 ? Config.RamWarn : app.RamWarn; } }
 
         string NameText { get { return (Config.Pinned ? "★ " : "") + Config.Name; } }
 
@@ -359,6 +363,7 @@ namespace RdpPanel
             menu.Items.Add("Shut down PC…", null, (s, e) => DoPower(false));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Settings…", null, (s, e) => { if (EditRequested != null) EditRequested(this); });
+            menu.Items.Add("Duplicate this session", null, (s, e) => { if (DuplicateRequested != null) DuplicateRequested(this); });
 
             tips.SetToolTip(btnEditS, "Settings of this session");
             tips.SetToolTip(btnExpand, "Show only this screen large (and back)");
@@ -595,6 +600,23 @@ namespace RdpPanel
 
         public void Connect()
         {
+            Connect(false);
+        }
+
+        // Tears the ActiveX control down so the next Connect() starts with a fresh one.
+        // A control that once threw E_FAIL (stale state after an aborted connect) keeps throwing it.
+        void DisposeRdp()
+        {
+            if (rdp == null) return;
+            var old = rdp;
+            rdp = null;
+            connectWhenReady = false;
+            try { screen.Controls.Remove(old); } catch { }
+            try { old.Dispose(); } catch { }
+        }
+
+        void Connect(bool isRetryAfterReset)
+        {
             if (string.IsNullOrWhiteSpace(Config.Host))
             {
                 state = St.NotSet;
@@ -602,6 +624,7 @@ namespace RdpPanel
                 return;
             }
 
+            string step = "create control";
             try
             {
                 EnsureRdp();
@@ -621,13 +644,17 @@ namespace RdpPanel
                 retryTimer.Stop();
                 lastAttempt = DateTime.Now;
 
+                step = "server/user";
                 rdp.Server = Config.GetHost();
                 rdp.UserName = Config.User;
-                ((IMsTscNonScriptable)rdp.GetOcx()).ClearTextPassword = Config.Password;
+                step = "password";
+                ((IMsTscNonScriptable)rdp.GetOcx()).ClearTextPassword = Config.Password ?? "";
+                step = "screen size/colors";
                 rdp.DesktopWidth = Config.Width;
                 rdp.DesktopHeight = Config.Height;
                 rdp.ColorDepth = 16; // light: less bandwidth and CPU
 
+                step = "advanced settings";
                 var a = rdp.AdvancedSettings9;
                 a.RDPPort = Config.GetPort();
                 a.SmartSizing = true;               // scale the screen in the tile
@@ -644,18 +671,45 @@ namespace RdpPanel
                 // When reconnecting to an existing session this is ignored (it is already running).
                 if (!string.IsNullOrWhiteSpace(Config.LaunchLink))
                 {
+                    step = "start program (launch link)";
                     rdp.SecuredSettings.StartProgram =
                         "cmd.exe /c start \"\" \"" + Config.LaunchLink.Trim() + "\" & explorer.exe";
                 }
 
                 state = St.Connecting;
                 RefreshInfo();
+                step = "connect";
                 rdp.Connect();
             }
             catch (Exception ex)
             {
-                state = St.Error;
+                LogService.Write(Config.Name, "Failed", "RDP control error at step '" + step + "': " + ex.Message, 0);
+
+                // First failure: throw the control away and try once more with a fresh one.
+                if (!isRetryAfterReset)
+                {
+                    DisposeRdp();
+                    Connect(true);
+                    return;
+                }
+
+                // Still failing: show the error, but keep retrying with the normal back-off
+                // instead of staying stuck until someone clicks Reconnect.
+                DisposeRdp();
                 stateText = ex.Message;
+                if (++retryCount > MaxRetries)
+                {
+                    userDisconnected = true;
+                    state = St.Stopped;
+                    stateText = "Stopped after " + MaxRetries + " attempts: " + ex.Message;
+                }
+                else
+                {
+                    int wait = Math.Min(60, 5 * retryCount);
+                    state = St.Error;
+                    retryTimer.Interval = wait * 1000;
+                    retryTimer.Start();
+                }
                 RefreshInfo();
             }
         }
@@ -697,6 +751,7 @@ namespace RdpPanel
             else
             {
                 retryCount = 0;
+                if (state == St.Error || state == St.Stopped) DisposeRdp();
                 Connect();
             }
         }
