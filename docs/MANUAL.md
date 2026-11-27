@@ -128,3 +128,14 @@ The button Export to Discord on the Alt accounts tab opens a window. Choose wher
 Log filter and history (1.6.1)
 On the Log page you can choose the days (one day, 7 days, 30 days or all), a session, an event type and a word to look for. The button Export to CSV saves what you see.
 On the Monitoring page every chart has a button 14 days (or press Ctrl+K and type History): the connected time per day, the drops per day and the daily average of CPU, RAM and FPS of the last 14 days. The panel keeps these numbers for 14 days.
+
+The page Discord (1.7.0)
+All settings for the messages to Discord are on the page Discord (under Alt accounts in the list). Press Save after you change something.
+- What is sent: drops, problems, high CPU/RAM and frozen sessions can each be switched on or off.
+- Second webhook: important messages (drops, no response, frozen) also go to this webhook, with a mention. Write the mention as role:ID, user:ID, @here or @everyone.
+- Reminder: one extra message when a problem lasts longer than the minutes you choose.
+- Bundling: messages that come within the seconds you choose become one message with a list.
+- Reports: the daily report on the days you choose, and a weekly report. The reports can have their own webhook, and for the bot their own channel. Commands can have their own channel.
+- Texts: change how a message looks with {session} {host} {message} {reason} {time} {date} {minutes} {count} {list}. The preview shows the result.
+- Test: press a test button to send an example message; Last messages shows what was sent and if it worked.
+- In the settings of a session you can give that session its own webhook and bot channel.
