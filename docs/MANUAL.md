@@ -123,4 +123,8 @@ Drop a .rdp file on the top bar, the list of pages, the bottom bars or the empty
 Ctrl+K and then "Start the tour" shows the short tour again.
 
 Alt accounts to Discord
-The button Export to Discord on the Alt accounts tab sends every alt (name, kind, the session, the numbers, goals, note, last updated and the hive picture) and a total of all alts to the Discord webhook from Settings. Set the webhook there first.
+The button Export to Discord on the Alt accounts tab opens a window. Choose where it goes: the panel webhook from Settings, or press Add to save the webhook link of any channel (it is stored encrypted on this PC). Tick which alts to send and whether to include the hive pictures and an overview with a total. Every alt arrives in Discord as a card with its numbers, the goals with a progress bar, the note and the picture.
+
+Log filter and history (1.6.1)
+On the Log page you can choose the days (one day, 7 days, 30 days or all), a session, an event type and a word to look for. The button Export to CSV saves what you see.
+On the Monitoring page every chart has a button 14 days (or press Ctrl+K and type History): the connected time per day, the drops per day and the daily average of CPU, RAM and FPS of the last 14 days. The panel keeps these numbers for 14 days.
