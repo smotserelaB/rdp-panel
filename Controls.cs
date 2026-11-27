@@ -234,17 +234,16 @@ namespace RdpPanel
     }
 
     // card with border and title
-    class Card : Panel
+    class Card : RoundedPanel
     {
         public readonly Label Title = new Label();
         public readonly Panel Body = new Panel();
 
         public Card(string title)
         {
-            BackColor = Theme.Line;
-            Padding = new Padding(1);
+            Padding = new Padding(4);
 
-            var inner = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+            var inner = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
             Title.Dock = DockStyle.Top;
             Title.Height = 32;
             Title.Text = title;
@@ -252,9 +251,10 @@ namespace RdpPanel
             Title.TextAlign = ContentAlignment.MiddleLeft;
             Title.Font = Theme.UI(10f, FontStyle.Bold);
             Title.ForeColor = Theme.Fg;
+            Title.BackColor = Color.Transparent;
 
             Body.Dock = DockStyle.Fill;
-            Body.BackColor = Theme.Surface;
+            Body.BackColor = Color.Transparent;
             Body.Padding = new Padding(10, 0, 10, 8);
 
             inner.Controls.Add(Body);

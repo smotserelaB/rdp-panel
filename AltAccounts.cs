@@ -152,17 +152,7 @@ namespace RdpPanel
     }
 
     // the mouse wheel must not change a number or a choice by accident: it scrolls the alt list instead
-    class NoWheelNumeric : NumericUpDown
-    {
-        protected override void OnMouseWheel(MouseEventArgs e)
-        {
-            var h = e as HandledMouseEventArgs;
-            if (h != null) h.Handled = true;
-            NoWheel.Scroll(this, e.Delta);
-        }
-    }
-
-    class NoWheelCombo : ComboBox
+    class NoWheelCombo : DarkCombo
     {
         protected override void OnMouseWheel(MouseEventArgs e)
         {
@@ -208,6 +198,7 @@ namespace RdpPanel
         readonly List<Action> refreshers = new List<Action>();                         // session status per card
         readonly List<Tuple<AltAccount, Label>> weekLabels = new List<Tuple<AltAccount, Label>>();
         bool building;
+        Button btnDiscord;
 
         public AltPage(MainForm main)
         {
@@ -262,6 +253,9 @@ namespace RdpPanel
                 Rebuild();
             };
             bar.Controls.Add(cmbSort);
+
+            btnDiscord = UI.Btn(bar, "Export to Discord", 494, 38, 170, false);
+            btnDiscord.Click += (s, e) => ExportToDiscord();
 
             lblTotal.AutoSize = false;
             lblTotal.Location = new Point(0, 78);
@@ -572,32 +566,31 @@ namespace RdpPanel
                 int y = 8 + (i / 4) * 96;
                 UI.Lbl(details, it.Emoji + "  " + it.Label + ":", x, y, 180, false).Font = Theme.UI(9f);
 
-                var num = new NoWheelNumeric { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true, Value = Math.Max(0, it.Get(a)) };
+                var num = new NumBox { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true, Value = Math.Max(0, it.Get(a)) };
                 UI.Put(details, num, x, y + 24, 160);
 
-                UI.Lbl(details, "🎯", x, y + 54, 22, true);
-                var numGoal = new NoWheelNumeric { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true };
+                UI.Lbl(details, "🎯", x, y + 52, 24, true).Font = Theme.UI(11f);
+                var numGoal = new NumBox { Minimum = 0, Maximum = 999999999999999m, ThousandsSeparator = true };
                 long g0; a.Goals.TryGetValue(it.Label, out g0);
                 numGoal.Value = Math.Max(0, g0);
                 UI.Put(details, numGoal, x + 24, y + 52, 100);
                 var pct = new Label { Location = new Point(x + 128, y + 54), Size = new Size(50, 20), BackColor = Color.Transparent, ForeColor = Theme.FgMuted, Font = Theme.UI(8.5f) };
                 details.Controls.Add(pct);
-                var track = new Panel { Location = new Point(x, y + 78), Size = new Size(160, 5), BackColor = Theme.Raised };
-                var fill = new Panel { Location = new Point(0, 0), Size = new Size(0, 5), BackColor = Theme.Accent };
-                track.Controls.Add(fill);
-                details.Controls.Add(track);
+                var bar = new RoundBar { Location = new Point(x, y + 82), Size = new Size(160, 6) };
+                details.Controls.Add(bar);
 
                 Action showGoal = () =>
                 {
                     long v = (long)num.Value;
                     long goal = (long)numGoal.Value;
-                    if (goal <= 0) { pct.Text = ""; fill.Width = 0; return; }
+                    if (goal <= 0) { pct.Text = ""; bar.Ratio = 0; bar.Invalidate(); return; }
                     double r = Math.Min(1.0, (double)v / goal);
-                    fill.Width = (int)(track.Width * r);
                     bool done = v >= goal;
                     pct.Text = done ? "✓" : (int)(r * 100) + "%";
                     pct.ForeColor = done ? Theme.Good : Theme.FgMuted;
-                    fill.BackColor = done ? Theme.Good : Theme.Accent;
+                    bar.Ratio = r;
+                    bar.FillColor = done ? Theme.Good : Theme.Accent;
+                    bar.Invalidate();
                 };
                 showGoal();
 
@@ -658,6 +651,7 @@ namespace RdpPanel
             };
             pic.Controls.Add(lblNo);
             details.Controls.Add(pic);
+            using (var rp = Rounded.Path(new Rectangle(0, 0, pic.Width, pic.Height), 10)) pic.Region = new Region(rp);
 
             Action show = () =>
             {
@@ -789,6 +783,81 @@ namespace RdpPanel
                 }
                 catch (Exception ex) { MessageBox.Show(main, "Export failed: " + ex.Message, "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
+        }
+
+        // the data of one alt as a Discord message (max 1900 characters)
+        string DiscordText(AltAccount a)
+        {
+            var sc = main.Cfg.Sessions.FirstOrDefault(x => x.AltId == a.Id);
+            var sb = new StringBuilder();
+            sb.Append("**" + a.Name + "**");
+            if (!string.IsNullOrWhiteSpace(a.Kind)) sb.Append(" · " + a.Kind);
+            if (sc != null) sb.Append(" · session: " + sc.Name);
+            sb.AppendLine();
+            sb.AppendLine(string.Join("   ", Items.Select(i => i.Emoji + " " + i.Label + ": **" + i.Get(a).ToString("N0") + "**")));
+            var goals = new List<string>();
+            foreach (var i in Items)
+            {
+                long g;
+                if (a.Goals.TryGetValue(i.Label, out g) && g > 0)
+                    goals.Add(i.Emoji + " " + Math.Min(999, (int)(i.Get(a) * 100 / g)) + "% (" + i.Get(a).ToString("N0") + " / " + g.ToString("N0") + ")");
+            }
+            if (goals.Count > 0) sb.AppendLine("🎯 Goals: " + string.Join("   ", goals));
+            if (!string.IsNullOrWhiteSpace(a.Note)) sb.AppendLine("📝 " + a.Note);
+            if (a.LastUpdatedTicks > 0) sb.AppendLine("🕒 Updated: " + new DateTime(a.LastUpdatedTicks).ToString("dd-MM-yyyy HH:mm"));
+            string text = sb.ToString().TrimEnd();
+            return text.Length > 1890 ? text.Substring(0, 1890) : text;
+        }
+
+        // sends every alt (with its hive picture) to the Discord webhook of the panel
+        async void ExportToDiscord()
+        {
+            string url = main.Cfg.WebhookUrl;
+            if (!Discord.IsValid(url))
+            {
+                MessageBox.Show(main, "There is no Discord webhook yet.\r\nPut the link of your webhook in Settings (Discord webhook) and press Save.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var alts = main.Cfg.Alts.ToList();
+            if (alts.Count == 0)
+            {
+                MessageBox.Show(main, "There are no alt accounts to send.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (MessageBox.Show(main, "Send the data of " + alts.Count + " alt account(s), with their hive pictures, to your Discord webhook?", "Alt accounts",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+            btnDiscord.Enabled = false;
+            string oldText = btnDiscord.Text;
+            btnDiscord.Text = "Sending…";
+            string err = null;
+            try
+            {
+                err = await Discord.SendAsync(url, "🐝 **Alt accounts** · " + DateTime.Now.ToString("dd-MM-yyyy HH:mm") + " · " + alts.Count + " alt" + (alts.Count == 1 ? "" : "s"), null);
+                for (int k = 0; err == null && k < alts.Count; k++)
+                {
+                    var a = alts[k];
+                    List<KeyValuePair<string, byte[]>> files = null;
+                    string p = ImagePath(a);
+                    if (p.Length > 0 && File.Exists(p))
+                    {
+                        files = new List<KeyValuePair<string, byte[]>>();
+                        files.Add(new KeyValuePair<string, byte[]>((string.IsNullOrWhiteSpace(a.Name) ? "hive" : a.Name) + ".jpg", File.ReadAllBytes(p)));
+                    }
+                    err = await Discord.SendAsync(url, DiscordText(a), files);
+                    if (err == null) await System.Threading.Tasks.Task.Delay(600);
+                }
+                if (err == null)
+                {
+                    var tot = Items.Select(i => i.Emoji + " " + i.Label + ": **" + alts.Sum(x => i.Get(x)).ToString("N0") + "**");
+                    err = await Discord.SendAsync(url, "**Total of all alts**\r\n" + string.Join("   ", tot), null);
+                }
+            }
+            catch (Exception ex) { err = ex.Message; }
+            btnDiscord.Text = oldText;
+            btnDiscord.Enabled = true;
+            if (err == null) MessageBox.Show(main, "Sent " + alts.Count + " alt account(s) to Discord.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            else MessageBox.Show(main, "Sending to Discord failed: " + err, "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // one line of a ; separated file with "quotes"
@@ -968,7 +1037,7 @@ namespace RdpPanel
     {
         readonly AltAccount alt;
         readonly List<AltSnap> hist;
-        readonly ComboBox cmbItem = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+        readonly ComboBox cmbItem = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
         readonly AltLineChart chart = new AltLineChart();
         readonly Label lblSum = new Label();
 

@@ -233,6 +233,15 @@ namespace RdpPanel
             }
         }
 
+        // rounded corners of the whole tile
+        void RoundCorners()
+        {
+            if (Width < 24 || Height < 24) return;
+            var old = Region;
+            using (var p = Rounded.Path(new Rectangle(0, 0, Width, Height), 10)) Region = new Region(p);
+            if (old != null) old.Dispose();
+        }
+
         // compact view: only the header (status, CPU and RAM in it); the screen is hidden
         public void SetCompact(bool on)
         {
@@ -289,6 +298,7 @@ namespace RdpPanel
             lblPing.Text = "";
             header.Controls.AddRange(new Control[] { dot, lblName, lblHost, btnEditS, chipNote, lblFps, lblPing, lblCompact, btnExpand, btnMenu });
             lblCompact.Visible = false;
+            SizeChanged += (s, e) => RoundCorners();
             header.Resize += (s, e) => LayoutHeader();
 
             // screen with overlay

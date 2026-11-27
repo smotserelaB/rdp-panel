@@ -110,9 +110,10 @@ namespace RdpPanel
             c.ForeColor = Fg;
             c.Font = UI(9.5f);
             var tb = c as TextBox;
-            if (tb != null) tb.BorderStyle = BorderStyle.FixedSingle;
+            if (tb != null) tb.BorderStyle = BorderStyle.None;
             var nu = c as NumericUpDown;
-            if (nu != null) nu.BorderStyle = BorderStyle.FixedSingle;
+            if (nu != null) nu.BorderStyle = BorderStyle.None;
+            RoundInput.Attach(c);   // the parent draws a rounded outline behind it
         }
 
         [DllImport("dwmapi.dll")]

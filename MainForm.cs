@@ -57,7 +57,7 @@ namespace RdpPanel
         readonly Label lblTitle = new Label();
         readonly Label lblCount = new Label();
         readonly Label lblNet = new Label();
-        readonly ComboBox cmbProfile = new ComboBox();
+        readonly ComboBox cmbProfile = new DarkCombo();
         readonly NumericUpDown numCols = new NumericUpDown { Minimum = 1, Maximum = 12, Width = 54 };
         readonly Label lblRows = new Label();
         readonly Button btnGroup = Theme.MakeButton("Group by PC");
@@ -77,12 +77,18 @@ namespace RdpPanel
         MonitoringPage pgMon;
         AltPage pgAlt;
         HealthPage pgHealth;
+        Panel sideRows, sideCard;
+        Button btnCollapse;
+        string[] navNames;
+        readonly Panel favBar = new Panel();
+        readonly FlowLayoutPanel favFlow = new FlowLayoutPanel();
+        readonly Button btnBell = Theme.MakeButton("🔔");
         string lastScheduled;                 // the profile the schedule asked for last time (null = not looked yet)
         readonly Panel checkHost = new Panel();
         readonly Label lblCheck = new Label();
         int filterMode;                    // overview filter: 0 all, 1 problems, 2 offline, 3 connected
-        readonly ComboBox cmbFilter = new ComboBox();
-        readonly ComboBox cmbSort = new ComboBox();
+        readonly ComboBox cmbFilter = new DarkCombo();
+        readonly ComboBox cmbSort = new DarkCombo();
         readonly Button btnCompact = Theme.MakeButton("Compact");
         ActivityForm activityForm;
         string arrangeSig = "";
@@ -185,11 +191,15 @@ namespace RdpPanel
             content.Controls.Add(updateBar);   // added last, so it docks above the pages
 
             // order matters for docking: footer bar, top bar, sidebar, then the rest
+            BuildFavBar();
             Controls.Add(content);
+            Controls.Add(favBar);   // above the footer, right of the list of pages
             Controls.Add(side);
             Controls.Add(top);
             Controls.Add(footer);
 
+            EnableRdpDrop();
+            ResizeEnd += (s, e) => SaveWindowBounds();
             notify.Icon = SystemIcons.Application;
             notify.Text = "RDP Panel";
             var trayMenu = new ContextMenuStrip();
@@ -534,6 +544,7 @@ namespace RdpPanel
             inner.Controls.AddRange(new Control[] { star, cap, lblProfileName });
             foreach (Control c in new Control[] { inner, star, cap, lblProfileName }) c.Click += (s, e) => ShowPage(4);
             card.Controls.Add(inner);
+            sideCard = card;
 
             // theme and full screen
             var rows = new Panel { Dock = DockStyle.Top, Height = 112, BackColor = Theme.Surface };
@@ -562,11 +573,13 @@ namespace RdpPanel
             lf.Click += (s, e) => ToggleFullscreen();
             chipF.Click += (s, e) => ToggleFullscreen();
             rows.Controls.AddRange(new Control[] { lt, swTheme, lf, chipF });
+            sideRows = rows;
 
             // navigation
             string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts", "✚  Health" };
             // the page numbers stay as they are; this is where each one is shown in the list (Alt accounts under PC management)
             // order on the screen: Overview, Monitoring, Health, Log, PC management, Alt accounts, Profiles, Settings, Help, Credits
+            navNames = names;
             int[] slot = { 0, 1, 3, 4, 6, 7, 8, 9, 5, 2 };
             var navPanel = new Panel { Dock = DockStyle.Top, Height = names.Length * 44 + 14, BackColor = Theme.Surface };
             for (int i = 0; i < names.Length; i++)
@@ -593,6 +606,17 @@ namespace RdpPanel
             side.Controls.Add(card);
             side.Controls.Add(rows);
             side.Controls.Add(navPanel);
+
+            // button to make the list smaller (icons only) and back
+            var sideTop = new Panel { Dock = DockStyle.Top, Height = 42, BackColor = Theme.Surface };
+            btnCollapse = Theme.MakeButton("◀  Collapse");
+            btnCollapse.AutoSize = false;
+            btnCollapse.Location = new Point(10, 6);
+            btnCollapse.Size = new Size(194, 30);
+            btnCollapse.Click += (s, e) => SetSidebar(!Cfg.SidebarCollapsed, true);
+            sideTop.Controls.Add(btnCollapse);
+            side.Controls.Add(sideTop);
+            SetSidebar(Cfg.SidebarCollapsed, false);
         }
 
         void BuildOverview()
@@ -788,15 +812,20 @@ namespace RdpPanel
                 AppAudio.SetMuted(!Cfg.AlertSound);
             };
 
-            footer.Controls.AddRange(new Control[] { lblFootL, lblWarn, lblSound, swSound, lblAlerts, swAlerts });
+            btnBell.AutoSize = false;
+            btnBell.Size = new Size(64, 28);
+            btnBell.Click += (s, e) => { using (var nf = new NoticeForm()) nf.ShowDialog(this); UpdateBell(); };
+            tips.SetToolTip(btnBell, "The last notifications");
+            footer.Controls.AddRange(new Control[] { lblFootL, lblWarn, btnBell, lblSound, swSound, lblAlerts, swAlerts });
             footer.Resize += (s, e) =>
             {
                 swAlerts.Location = new Point(footer.Width - 16 - swAlerts.Width, 6);
                 lblAlerts.Location = new Point(swAlerts.Left - lblAlerts.Width - 6, 0);
                 swSound.Location = new Point(lblAlerts.Left - 18 - swSound.Width, 6);
                 lblSound.Location = new Point(swSound.Left - lblSound.Width - 6, 0);
+                btnBell.Location = new Point(lblSound.Left - 14 - btnBell.Width, 4);
                 int x = 520;
-                lblWarn.SetBounds(x, 0, Math.Max(0, lblSound.Left - x - 12), footer.Height);
+                lblWarn.SetBounds(x, 0, Math.Max(0, btnBell.Left - x - 12), footer.Height);
             };
         }
 
@@ -1452,7 +1481,12 @@ namespace RdpPanel
             try
             {
                 int n = HealthPage.Collect(this).Count(i => i.Level >= 1);
-                if (nav.Count > 9) nav[9].Text = "✚  Health" + (n > 0 ? "  (" + n + ")" : "");
+                if (nav.Count > 9)
+                {
+                    string badge = n > 0 ? "  (" + n + ")" : "";
+                    nav[9].Text = Cfg.SidebarCollapsed ? "✚" : "✚  Health" + badge;
+                    if (Cfg.SidebarCollapsed) tips.SetToolTip(nav[9], "Health" + badge);
+                }
             }
             catch { }
         }
@@ -1592,6 +1626,204 @@ namespace RdpPanel
             }
         }
 
+        // ---------------------------------------------------------------- 1.6.0: sidebar, quick buttons, bell, .rdp files, tour
+
+        void SetSidebar(bool collapsed, bool save)
+        {
+            Cfg.SidebarCollapsed = collapsed;
+            side.Width = collapsed ? 66 : 214;
+            if (sideRows != null) sideRows.Visible = !collapsed;
+            if (sideCard != null) sideCard.Visible = !collapsed;
+            btnCollapse.Text = collapsed ? "▶" : "◀  Collapse";
+            btnCollapse.Size = collapsed ? new Size(46, 30) : new Size(194, 30);
+            tips.SetToolTip(btnCollapse, collapsed ? "Show the names of the pages" : "Make this list smaller");
+            for (int i = 0; i < nav.Count && navNames != null && i < navNames.Length; i++)
+            {
+                var b = nav[i];
+                string full = navNames[i];
+                string icon = full.Split(' ')[0];
+                b.Size = collapsed ? new Size(46, 40) : new Size(194, 40);
+                b.TextAlign = collapsed ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft;
+                b.Padding = collapsed ? new Padding(0) : new Padding(14, 0, 0, 0);
+                b.Text = collapsed ? icon : full;
+                tips.SetToolTip(b, collapsed ? full.Substring(icon.Length).Trim() : "");
+            }
+            UpdateHealthBadge();
+            if (save) Cfg.Save();
+        }
+
+        // the quick buttons at the bottom (chosen in Settings)
+        internal static readonly string[][] FavDefs =
+        {
+            new[] { "connectall", "Connect all" },
+            new[] { "disconnectall", "Disconnect all" },
+            new[] { "reconnectproblems", "Reconnect problems" },
+            new[] { "screenshot", "Screenshot" },
+            new[] { "pause", "Pause / resume Discord" },
+            new[] { "sound", "Sound on/off" },
+            new[] { "compact", "Compact view" },
+            new[] { "health", "Health" },
+            new[] { "activity", "Activity" },
+            new[] { "search", "Search (Ctrl+K)" },
+            new[] { "add", "Add session" },
+            new[] { "alts", "Alt accounts" }
+        };
+
+        Action FavAction(string id)
+        {
+            switch (id)
+            {
+                case "connectall": return () => { foreach (var t in Tiles.ToList()) if (!hidden.Contains(t) && !t.Online) t.Connect(); };
+                case "disconnectall":
+                    return () =>
+                    {
+                        if (MessageBox.Show(this, "Disconnect all sessions on the screens?", "Disconnect all", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                        foreach (var t in Tiles.ToList()) if (!hidden.Contains(t) && t.Online) t.Disconnect();
+                    };
+                case "reconnectproblems": return () => { foreach (var t in Tiles.ToList()) if (!hidden.Contains(t) && t.StatusLabel == "Dropped") t.Reconnect(); };
+                case "screenshot": return () => ManualPanelShot();
+                case "pause": return () => { Cfg.DiscordPaused = !Cfg.DiscordPaused; Cfg.Save(); ShowBalloon("Discord", Cfg.DiscordPaused ? "Automatic Discord messages are paused." : "Automatic Discord messages are on again."); };
+                case "sound": return () => { swSound.Checked = !swSound.Checked; };
+                case "compact": return () => { Cfg.CompactView = !Cfg.CompactView; Cfg.Save(); UpdateCompactButton(); ArrangeTiles(); };
+                case "health": return () => ShowPage(9);
+                case "activity": return ShowActivity;
+                case "search": return ShowQuickSearch;
+                case "add": return AddSession;
+                case "alts": return () => ShowPage(8);
+            }
+            return null;
+        }
+
+        void BuildFavBar()
+        {
+            favBar.Dock = DockStyle.Bottom;
+            favBar.Height = 46;
+            favBar.BackColor = Theme.Bg;
+            favFlow.Dock = DockStyle.Fill;
+            favFlow.WrapContents = false;
+            favFlow.BackColor = Theme.Bg;
+            favFlow.Padding = new Padding(10, 8, 10, 0);
+            favBar.Controls.Add(favFlow);
+            RebuildFavBar();
+        }
+
+        internal void RebuildFavBar()
+        {
+            foreach (var c in favFlow.Controls.Cast<Control>().ToList()) { favFlow.Controls.Remove(c); c.Dispose(); }
+            foreach (var raw in (Cfg.FavActions ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string id = raw.Trim();
+                var def = FavDefs.FirstOrDefault(d => d[0] == id);
+                var act = FavAction(id);
+                if (def == null || act == null) continue;
+                var b = Theme.MakeButton(def[1]);
+                b.Margin = new Padding(0, 0, 8, 0);
+                b.Click += (s, e) => act();
+                favFlow.Controls.Add(b);
+            }
+            favBar.Visible = favFlow.Controls.Count > 0;
+        }
+
+        // the bell in the bar at the bottom: the number of new notifications
+        void UpdateBell()
+        {
+            int n = Notices.Unread;
+            string text = n > 0 ? "🔔 " + n : "🔔";
+            if (btnBell.Text != text)
+            {
+                btnBell.Text = text;
+                btnBell.BackColor = n > 0 ? Theme.Accent : Theme.Raised;
+                btnBell.ForeColor = n > 0 ? Color.White : Theme.Fg;
+            }
+        }
+
+        // ----- drop a .rdp file on the panel: a session with its address, user name and screen size -----
+
+        void EnableRdpDrop()
+        {
+            foreach (Control c in new Control[] { this, top, side, footer, favBar, content, pgOverview, host })
+            {
+                c.AllowDrop = true;
+                c.DragEnter += (s, e) => { e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; };
+                c.DragDrop += (s, e) =>
+                {
+                    var files = e.Data.GetData(DataFormats.FileDrop) as string[];
+                    if (files != null) RdpFilesDropped(files);
+                };
+            }
+        }
+
+        void RdpFilesDropped(string[] files)
+        {
+            foreach (var f in files.Where(x => x.EndsWith(".rdp", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    var sc = ParseRdpFile(f);
+                    if (sc == null)
+                    {
+                        MessageBox.Show(this, "There is no address (full address) in " + System.IO.Path.GetFileName(f) + ".", ".rdp file", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        continue;
+                    }
+                    string baseName = sc.Name;
+                    int n = 2;
+                    while (Cfg.Sessions.Any(x => x.Name == sc.Name)) sc.Name = baseName + " " + n++;
+                    AddConfigured(sc, false);
+                    var t = Tiles.LastOrDefault();
+                    if (t != null) { ShowPage(0); EditSession(t); }   // so you can fill in the password
+                }
+                catch (Exception ex) { ErrorLog.Write("rdp file", ex); }
+            }
+        }
+
+        static SessionConfig ParseRdpFile(string path)
+        {
+            var sc = new SessionConfig { Name = System.IO.Path.GetFileNameWithoutExtension(path) };
+            foreach (var line in System.IO.File.ReadAllLines(path))
+            {
+                var parts = line.Split(new[] { ':' }, 3);
+                if (parts.Length < 3) continue;
+                string key = parts[0].Trim().ToLowerInvariant();
+                string val = parts[2].Trim();
+                int n;
+                if (key == "full address") sc.Host = val;
+                else if (key == "username") sc.User = val;
+                else if (key == "desktopwidth" && int.TryParse(val, out n) && n >= 640) sc.Width = n;
+                else if (key == "desktopheight" && int.TryParse(val, out n) && n >= 480) sc.Height = n;
+            }
+            return string.IsNullOrWhiteSpace(sc.Host) ? null : sc;
+        }
+
+        // ----- window: also remember the place and size after a resize -----
+
+        void SaveWindowBounds()
+        {
+            if (WindowState == FormWindowState.Minimized) return;
+            var b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            Cfg.WinX = b.X; Cfg.WinY = b.Y; Cfg.WinW = b.Width; Cfg.WinH = b.Height;
+            Cfg.WinMax = WindowState == FormWindowState.Maximized;
+            Cfg.Save();
+        }
+
+        // ----- the tour -----
+
+        internal void StartTour()
+        {
+            var steps = new List<TourStep>
+            {
+                new TourStep { Target = () => side, Right = true, Title = "The pages", Text = "Here you go to the Overview, Monitoring, Health, the Log, PC management, Alt accounts, Profiles and Settings. The arrow at the top makes this list smaller." },
+                new TourStep { Target = () => btnAdd, Title = "Add a session", Text = "Add a PC here. You can also drop a .rdp file on the panel. Ctrl+K searches everything: sessions, pages and actions." },
+                new TourStep { Target = () => cmbFilter, Title = "Show what you want", Text = "Choose what to show (all, problems, offline, connected) and how to sort. The buttons next to it give a compact view and the activity window." },
+                new TourStep { Target = () => host, Title = "Your sessions", Text = "Every tile is a session. Double-click its header to see it large. The menu with the three dots has pin, mute, settings and more." },
+                new TourStep { Target = () => nav.Count > 9 ? nav[9] : null, Right = true, Title = "Health", Text = "This page tells you in plain words what needs attention, with a button to fix it. The number shows how many things there are." },
+                new TourStep { Target = () => swSound, Title = "Sound and notifications", Text = "One switch turns all sound off. The bell shows the last notifications, and the switch next to Notifications turns the warnings off." },
+                new TourStep { Target = null, Title = "That is it", Text = "Press F1 for the help. You can start this tour again with Ctrl+K and then 'Start the tour'." }
+            };
+            var f = new TourForm(this, steps);
+            f.FormClosed += (s, e) => { Cfg.TourDone = true; Cfg.Save(); };
+            f.Show(this);
+        }
+
         // ---------------------------------------------------------------- tray icon with the status color
 
         static System.Drawing.Icon MakeDot(Color c)
@@ -1702,6 +1934,7 @@ namespace RdpPanel
 
         void OnAlert(SessionTile t, string msg)
         {
+            Notices.Add(t.Config.Name, msg, 1);
             lblWarn.Text = "⚠ Warning: " + msg;
             warnAt = DateTime.Now;
             RefreshSummary();
@@ -1819,6 +2052,7 @@ namespace RdpPanel
         // unexpected drop: keep the panel as it just was and send it (with the last image of the session) to Discord
         void OnDropped(SessionTile t, string reason)
         {
+            Notices.Add(t.Config.Name, "Dropped: " + reason, 2);
             var shot = lastPanelJpeg != null ? Tuple.Create(lastPanelJpeg, lastPanelAt) : null;
             if (Cfg.ScreenshotOnDrop && shot != null)
             {
@@ -1914,6 +2148,7 @@ namespace RdpPanel
                 syncingSound = false;
                 soundAssert = 40;
             }
+            UpdateBell();
         }
 
         // "Sound off" mutes everything the panel plays in the Windows volume mixer (the sound of the sessions too);
@@ -2009,6 +2244,7 @@ namespace RdpPanel
         {
             try
             {
+                Notices.Add(title, text, 0);
                 notify.ShowBalloonTip(6000, title, text, ToolTipIcon.Info);
                 if (Cfg.AlertSound) System.Media.SystemSounds.Asterisk.Play();
             }
@@ -2043,6 +2279,7 @@ namespace RdpPanel
             }
             l.Add(new Tuple<string, Action>("Action: " + (Cfg.CompactView ? "Normal view (not compact)" : "Compact view"), () => { Cfg.CompactView = !Cfg.CompactView; Cfg.Save(); UpdateCompactButton(); ArrangeTiles(); }));
             l.Add(new Tuple<string, Action>("Action: Open the activity window", ShowActivity));
+            l.Add(new Tuple<string, Action>("Action: Start the tour of the panel", StartTour));
             l.Add(new Tuple<string, Action>("Action: " + (Cfg.AlertSound ? "Turn sound off" : "Turn sound on"), () => { swSound.Checked = !swSound.Checked; }));
             l.Add(new Tuple<string, Action>("Action: " + (Cfg.DiscordPaused ? "Resume Discord messages" : "Pause all Discord messages"), () => { Cfg.DiscordPaused = !Cfg.DiscordPaused; Cfg.Save(); }));
             l.Add(new Tuple<string, Action>("Action: Show all sessions (clear the filter)", () => { cmbFilter.SelectedIndex = 0; txtSearch.Text = ""; }));
@@ -2354,6 +2591,7 @@ namespace RdpPanel
                 Cfg.TutorialDone = true;   // only once
                 Cfg.Save();
                 ShowTutorial();
+                if (!Cfg.TourDone && tutorial != null) tutorial.FormClosed += (sender2, args2) => StartTour();
             }
             if (!freshInstall && Cfg.UpdateMsgSentFor != AppInfo.Version && ReleaseNotes.IsNewer(AppInfo.Version, Cfg.LastSeenVersion))
                 updatedFromVersion = Cfg.LastSeenVersion ?? "";

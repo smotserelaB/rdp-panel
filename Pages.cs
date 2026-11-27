@@ -369,7 +369,7 @@ namespace RdpPanel
         readonly CheckBox chkDiscDrop = new CheckBox { Text = "Send a screenshot to Discord when a session drops", AutoSize = true };
         readonly CheckBox chkDiscAlerts = new CheckBox { Text = "Also send all notifications as text to Discord", AutoSize = true };
         readonly NumericUpDown numDiscMin = new NumericUpDown { Minimum = 0, Maximum = 1440 };
-        readonly ComboBox cmbShotMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly ComboBox cmbShotMode = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly TextBox txtBotToken = new TextBox { UseSystemPasswordChar = true };
         readonly CheckBox chkBot = new CheckBox { Text = "Discord bot on (commands and buttons)", AutoSize = true };
         readonly TextBox txtBotChannel = new TextBox();
@@ -379,9 +379,10 @@ namespace RdpPanel
         readonly CheckBox chkQuiet = new CheckBox { Text = "Quiet hours: fewer Discord messages between", AutoSize = true };
         readonly DateTimePicker dtpQuietFrom = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
         readonly DateTimePicker dtpQuietTo = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
-        readonly ComboBox cmbQuietMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly ComboBox cmbQuietMode = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList };
         readonly NumericUpDown numMaxMsgs = new NumericUpDown { Minimum = 0, Maximum = 500 };
         readonly Label lblRules = new Label { AutoSize = true };
+        readonly CheckedListBox clbFav = new CheckedListBox { CheckOnClick = true, BorderStyle = BorderStyle.None, IntegralHeight = false };
         readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer { Interval = 2000 };
         string lastBotState = "";
         DateTime lastBotChange = DateTime.Now;
@@ -537,6 +538,18 @@ namespace RdpPanel
             box.Controls.Add(lblRules);
             y += 40;
 
+            UI.Lbl(box, "Quick buttons at the bottom of the panel", 0, y, 500, false).Font = Theme.UI(10.5f, FontStyle.Bold);
+            y += 28;
+            UI.Lbl(box, "Tick the buttons you want in the bar above the status line. They show after you press Save.", 0, y, 760, true);
+            y += 28;
+            clbFav.BackColor = Theme.Raised;
+            clbFav.ForeColor = Theme.Fg;
+            clbFav.Font = Theme.UI(9.5f);
+            clbFav.SetBounds(0, y, 320, 200);
+            foreach (var d in MainForm.FavDefs) clbFav.Items.Add(d[1]);
+            box.Controls.Add(clbFav);
+            y += 216;
+
             UI.Lbl(box, "Daily report", 0, y, 300, false).Font = Theme.UI(10.5f, FontStyle.Bold);
             y += 28;
             UI.Lbl(box, "One message every morning with, per session: the uptime of the day before, the number of drops and the average CPU, RAM and FPS.", 0, y, 760, true);
@@ -620,6 +633,7 @@ namespace RdpPanel
             box.Height = y + 70;
             Controls.Add(box);
 
+            HelpMarks.Add(box);
             statusTimer.Tick += (s, e) => { if (Visible && !IsDisposed) UpdateBotStatus(); };
             statusTimer.Start();
         }
@@ -676,6 +690,8 @@ namespace RdpPanel
             txtBotAllowed.Text = c.BotAllowedUsers;
             chkBot.Checked = c.BotEnabled;
             chkPause.Checked = c.DiscordPaused;
+            var favIds = (c.FavActions ?? "").Split(',').Select(x => x.Trim()).ToList();
+            for (int fi = 0; fi < MainForm.FavDefs.Length; fi++) clbFav.SetItemChecked(fi, favIds.Contains(MainForm.FavDefs[fi][0]));
             chkQuiet.Checked = c.QuietHoursOn;
             TimeSpan qf, qt;
             if (!TimeSpan.TryParse(c.QuietFrom, CultureInfo.InvariantCulture, out qf)) qf = TimeSpan.Zero;
@@ -718,6 +734,10 @@ namespace RdpPanel
             c.DiscordIntervalMin = (int)numDiscMin.Value;
             c.DiscordShotMode = cmbShotMode.SelectedIndex == 1 ? 1 : 0;
             c.DiscordPaused = chkPause.Checked;
+            var favOn = new List<string>();
+            for (int fi = 0; fi < MainForm.FavDefs.Length; fi++) if (clbFav.GetItemChecked(fi)) favOn.Add(MainForm.FavDefs[fi][0]);
+            c.FavActions = string.Join(",", favOn);
+            main.RebuildFavBar();
             c.QuietHoursOn = chkQuiet.Checked;
             c.QuietFrom = dtpQuietFrom.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
             c.QuietTo = dtpQuietTo.Value.ToString("HH:mm", CultureInfo.InvariantCulture);

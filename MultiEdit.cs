@@ -82,7 +82,7 @@ namespace RdpPanel
 
         static ComboBox YesNo()
         {
-            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            var c = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
             c.Items.Add("Yes");
             c.Items.Add("No");
             c.SelectedIndex = 0;

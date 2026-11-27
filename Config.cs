@@ -135,6 +135,9 @@ namespace RdpPanel
 
         // overview
         public int SortMode;             // 0 = my order, 1 = name, 2 = problems first, 3 = CPU high to low, 4 = FPS low to high
+        public bool SidebarCollapsed;    // the list of pages on the left shows only icons
+        public string FavActions = "connectall,pause,sound,health";   // the quick buttons at the bottom
+        public bool TourDone;            // the tour of the screen was shown
         public bool ChecklistHidden;     // the 'Getting started' card on the overview
         public bool EverConnected;       // a session was connected at least once (for that card)
         public int AltSort;              // sort of the Alt accounts tab: 0 = my order, 1 = name, 2 = kind, 3.. = most of an item
