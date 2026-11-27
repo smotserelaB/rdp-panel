@@ -114,3 +114,13 @@ A profile can switch by itself: Profiles, Schedule... chooses the days and the t
 Settings has Export settings and Import settings: a file with your sessions, profiles and settings, without passwords, webhook link and bot token. Importing updates sessions with the same name and adds the new ones.
 The Daily summary has a column Yesterday.
 Shortcuts: Ctrl+K search everything, Ctrl+N add a session, Ctrl+F search the sessions, F5 reconnect the selected session, Ctrl+M sound on/off, Ctrl+Shift+C compact view, Ctrl+L the log, Ctrl+H Health.
+
+Look and quick actions (1.6.0)
+The corners are rounded and the drop-down lists follow the theme. The arrow at the top of the list of pages makes it smaller (icons only); point at an icon to see its name.
+Settings has "Quick buttons at the bottom of the panel": tick the actions you want (connect all, disconnect all, reconnect problems, screenshot, pause Discord, sound, compact view, Health, Activity, search, add session, Alt accounts). The ? next to many settings explains them.
+The bell at the bottom shows how many new notifications there are; click it for the last 100.
+Drop a .rdp file on the top bar, the list of pages, the bottom bars or the empty part of the overview: the panel makes a session with the address, user name and screen size from the file and opens its settings so you can add the password.
+Ctrl+K and then "Start the tour" shows the short tour again.
+
+Alt accounts to Discord
+The button Export to Discord on the Alt accounts tab sends every alt (name, kind, the session, the numbers, goals, note, last updated and the hive picture) and a total of all alts to the Discord webhook from Settings. Set the webhook there first.
