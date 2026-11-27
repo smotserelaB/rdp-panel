@@ -61,6 +61,15 @@ namespace RdpPanel
         public bool HideInDailySummary;     // not shown in the Daily summary
         public bool HideInPcList;           // not shown in PC management
         public string AltId = "";           // the alt account (Alt accounts tab) that plays on this session
+        public string WebhookEnc = "";      // own Discord webhook for this session (empty = the normal one)
+        public string BotChannel = "";      // own bot channel ID for this session (empty = the normal one)
+
+        [ScriptIgnore]
+        public string Webhook
+        {
+            get { return Secret.Unprotect(WebhookEnc); }
+            set { WebhookEnc = Secret.Protect(value); }
+        }
 
         [ScriptIgnore]
         public string Password
@@ -158,6 +167,43 @@ namespace RdpPanel
 
         // saved webhooks you can choose from (for example for the alt accounts); the links are encrypted
         public List<DiscordTarget> DiscordTargets = new List<DiscordTarget>();
+
+        // ---- 1.7.0: what goes to Discord and where ----
+        public bool DcProblem = true;        // 'PC does not respond', 'stopped reconnecting'
+        public bool DcLoad = true;           // high CPU / RAM
+        public bool DcFrozen = true;         // frozen session
+
+        public string CritWebhookEnc = "";   // second webhook, only for important messages (drops, no response, frozen)
+        public string CritMention = "";      // who to mention there (role:ID, user:ID, @here, @everyone)
+        [ScriptIgnore]
+        public string CritWebhookUrl
+        {
+            get { return Secret.Unprotect(CritWebhookEnc); }
+            set { CritWebhookEnc = Secret.Protect(value); }
+        }
+
+        public int RepeatMinutes;            // 0 = off; one reminder when a problem lasts this long
+        public int BundleSeconds = 20;       // 0 = off; messages within this time become one message
+
+        public int ReportDays = 127;         // bit 0 = Sunday ... bit 6 = Saturday: the days the daily report is sent
+        public bool WeeklyOn;
+        public int WeeklyDay = 1;            // 0 = Sunday ... 6 = Saturday
+        public string WeeklyTime = "08:00";
+        public string LastWeeklyDate = "";
+        public string ReportWebhookEnc = ""; // own webhook for the reports (empty = the normal webhook)
+        [ScriptIgnore]
+        public string ReportWebhookUrl
+        {
+            get { return Secret.Unprotect(ReportWebhookEnc); }
+            set { ReportWebhookEnc = Secret.Protect(value); }
+        }
+        public string BotCmdChannelId = "";    // channel for the bot commands (empty = the alert channel)
+        public string BotReportChannelId = ""; // channel for the reports (empty = the alert channel)
+
+        public string TplAlert = "⚠ {message}";
+        public string TplDrop = "⚠ **{session}** ({host}) dropped at {time}.\n{reason}";
+        public string TplReminder = "⏰ **{session}** still has a problem after {minutes} min: {message}";
+        public string TplBundle = "⚠ **{count} sessions** have a problem:\n{list}";
         public string AltTargetName = "";   // the destination used last time for the alt accounts
 
         [ScriptIgnore]

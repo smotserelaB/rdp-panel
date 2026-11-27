@@ -24,6 +24,8 @@ namespace RdpPanel
         readonly NumericUpDown numFrozen = new NumericUpDown { Minimum = 0, Maximum = 240 };
         readonly CheckBox chkFrozenRe = new CheckBox { Text = "Reconnect by itself when frozen", AutoSize = true };
         readonly CheckBox chkSum = new CheckBox { Text = "Show in the Daily summary", AutoSize = true };
+        readonly TextBox txtHook = new TextBox { UseSystemPasswordChar = true };
+        readonly TextBox txtChan = new TextBox();
         readonly CheckBox chkPc = new CheckBox { Text = "Show in PC management", AutoSize = true };
         readonly CheckBox chkMon = new CheckBox { Text = "Show on the Monitoring page and in the performance overview", AutoSize = true };
         readonly Button btnColor;
@@ -103,7 +105,16 @@ namespace RdpPanel
             chkPc.Location = new Point(190, y);
             chkPc.ForeColor = Theme.Fg;
             Controls.Add(chkPc);
-            y += 34;
+            y += 38;
+
+            UI.Lbl(this, "Own Discord webhook (empty = the normal one)", 16, y, 460, true).Font = Theme.UI(8.5f);
+            y += 22;
+            UI.Put(this, txtHook, 16, y, 470);
+            y += 36;
+            UI.Lbl(this, "Own bot channel ID (empty = the normal one)", 16, y, 460, true).Font = Theme.UI(8.5f);
+            y += 22;
+            UI.Put(this, txtChan, 16, y, 250);
+            y += 42;
             int by = y + 6;   // y of the buttons
 
             txtName.Text = sc.Name;
@@ -125,6 +136,8 @@ namespace RdpPanel
             chkMon.Checked = !sc.HideInMonitoring;
             chkSum.Checked = !sc.HideInDailySummary;
             chkPc.Checked = !sc.HideInPcList;
+            txtHook.Text = sc.Webhook;
+            txtChan.Text = sc.BotChannel;
             colorHex = sc.ColorHex;
             ShowColor();
 
@@ -180,6 +193,8 @@ namespace RdpPanel
             sc.HideInMonitoring = !chkMon.Checked;
             sc.HideInDailySummary = !chkSum.Checked;
             sc.HideInPcList = !chkPc.Checked;
+            sc.Webhook = txtHook.Text.Trim();
+            sc.BotChannel = txtChan.Text.Trim();
         }
     }
 }

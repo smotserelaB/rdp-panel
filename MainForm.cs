@@ -77,6 +77,12 @@ namespace RdpPanel
         MonitoringPage pgMon;
         AltPage pgAlt;
         HealthPage pgHealth;
+        DiscordPage pgDiscord;
+        DiscordHub hub;
+        internal DiscordHub Hub { get { if (hub == null) hub = new DiscordHub(this); return hub; } }
+        internal DiscordBot BotRef { get { return bot; } }
+        bool weeklyBusy;
+        DateTime nextWeeklyTry = DateTime.MinValue;
         Panel sideRows, sideCard;
         Button btnCollapse;
         string[] navNames;
@@ -167,6 +173,7 @@ namespace RdpPanel
             pgMon = new MonitoringPage(this);
             pgAlt = new AltPage(this);
             pgHealth = new HealthPage(this);
+            pgDiscord = new DiscordPage(this);
             pgLog = new LogPage(this);
             pgPc = new PcPage(this);
             pgProf = new ProfilesPage(this);
@@ -181,7 +188,7 @@ namespace RdpPanel
 
             content.Dock = DockStyle.Fill;
             content.BackColor = Theme.Bg;
-            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits, pgAlt, pgHealth })
+            foreach (Control p in new Control[] { pgOverview, pgMon, pgLog, pgPc, pgProf, pgSet, pgHelp, pgCredits, pgAlt, pgHealth, pgDiscord })
             {
                 p.Dock = DockStyle.Fill;
                 p.Visible = false;
@@ -233,6 +240,8 @@ namespace RdpPanel
                 if (tick % 30 == 12) SendUpdatedMessage();
                 if (tick % 5 == 2) UpdateTrayIcon();
                 if (tick % 5 == 3) ApplySound();
+                Hub.Tick();
+                if (tick % 30 == 20) CheckWeeklyReport();
                 if (tick % 5 == 4) { UpdateHealthBadge(); UpdateChecklist(); }
                 if (tick % 20 == 7) CheckProfileSchedule();
                 if (tick % 600 == 17) pgAlt.SnapshotToday();
@@ -576,11 +585,11 @@ namespace RdpPanel
             sideRows = rows;
 
             // navigation
-            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts", "✚  Health" };
+            string[] names = { "⌂  Overview", "∿  Monitoring", "☰  Log", "▣  PC management", "★  Profiles", "⚙  Settings", "?  Help", "♥  Credits", "🐝  Alt accounts", "✚  Health", "💬  Discord" };
             // the page numbers stay as they are; this is where each one is shown in the list (Alt accounts under PC management)
-            // order on the screen: Overview, Monitoring, Health, Log, PC management, Alt accounts, Profiles, Settings, Help, Credits
+            // order on the screen: Overview, Monitoring, Health, Log, PC management, Alt accounts, Discord, Profiles, Settings, Help, Credits
             navNames = names;
-            int[] slot = { 0, 1, 3, 4, 6, 7, 8, 9, 5, 2 };
+            int[] slot = { 0, 1, 3, 4, 7, 8, 9, 10, 5, 2, 6 };
             var navPanel = new Panel { Dock = DockStyle.Top, Height = names.Length * 44 + 14, BackColor = Theme.Surface };
             for (int i = 0; i < names.Length; i++)
             {
@@ -588,7 +597,7 @@ namespace RdpPanel
                 var b = new Button
                 {
                     Text = names[i],
-                    Location = new Point(10, 8 + slot[i] * 44),
+                    Location = new Point(10, 8 + slot[i] * 42),
                     Size = new Size(194, 40),
                     FlatStyle = FlatStyle.Flat,
                     TextAlign = ContentAlignment.MiddleLeft,
@@ -844,6 +853,7 @@ namespace RdpPanel
             pgCredits.Visible = idx == 7;
             pgAlt.Visible = idx == 8;
             pgHealth.Visible = idx == 9;
+            pgDiscord.Visible = idx == 10;
 
             for (int i = 0; i < nav.Count; i++)
             {
@@ -861,6 +871,7 @@ namespace RdpPanel
             else if (idx == 5) pgSet.Load();
             else if (idx == 8) pgAlt.Rebuild();
             else if (idx == 9) pgHealth.Rebuild();
+            else if (idx == 10) pgDiscord.LoadAll();
         }
 
         // ---------------------------------------------------------------- tiles
@@ -1290,10 +1301,59 @@ namespace RdpPanel
             if (rows.Count > 0) Task.Run(() => MetricsService.Write(rows));
         }
 
+        string ReportChannel()
+        {
+            return !string.IsNullOrWhiteSpace(Cfg.BotReportChannelId) ? Cfg.BotReportChannelId.Trim() : (Cfg.BotChannelId ?? "").Trim();
+        }
+
+        string ReportHook()
+        {
+            return Discord.IsValid(Cfg.ReportWebhookUrl) ? Cfg.ReportWebhookUrl : Cfg.WebhookUrl;
+        }
+
         bool CanSendReport()
         {
-            return Discord.IsValid(Cfg.WebhookUrl)
-                || (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId));
+            return Discord.IsValid(ReportHook())
+                || (bot != null && bot.Running && !string.IsNullOrWhiteSpace(ReportChannel()));
+        }
+
+        // the weekly report: the last 7 days, once on the chosen day from the chosen time
+        async void CheckWeeklyReport()
+        {
+            try
+            {
+                if (!Cfg.WeeklyOn || Cfg.DiscordPaused || weeklyBusy || DateTime.Now < nextWeeklyTry) return;
+                var now = DateTime.Now;
+                if ((int)now.DayOfWeek != Cfg.WeeklyDay) return;
+                TimeSpan at;
+                if (!TimeSpan.TryParse(Cfg.WeeklyTime, CultureInfo.InvariantCulture, out at)) at = new TimeSpan(8, 0, 0);
+                string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (Cfg.LastWeeklyDate == today || now.TimeOfDay < at) return;
+                if (!CanSendReport()) return;
+
+                weeklyBusy = true;
+                var to = DateTime.Today;
+                var from = to.AddDays(-7);
+                string res = await SendReportRange(from, to, "Weekly report – " + from.ToString("d MMM", CultureInfo.InvariantCulture) + " to " + to.AddDays(-1).ToString("d MMM yyyy", CultureInfo.InvariantCulture), "7 days");
+                weeklyBusy = false;
+                if (res == null || res == DailyReport.NoData)
+                {
+                    Cfg.LastWeeklyDate = today;
+                    Cfg.Save();
+                    LogService.Write("", "Report", res == null ? "weekly report sent" : "no data yet, weekly report skipped", 0);
+                }
+                else
+                {
+                    nextWeeklyTry = DateTime.Now.AddMinutes(10);
+                    LogService.Write("", "Report", "sending the weekly report failed: " + res, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                weeklyBusy = false;
+                nextWeeklyTry = DateTime.Now.AddMinutes(10);
+                ErrorLog.Write("weekly report", ex);
+            }
         }
 
         // sends the daily report once per day, from the chosen time on
@@ -1306,6 +1366,7 @@ namespace RdpPanel
                 if (!TimeSpan.TryParse(Cfg.ReportTime, CultureInfo.InvariantCulture, out at)) at = new TimeSpan(8, 0, 0);
                 var now = DateTime.Now;
                 string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if ((Cfg.ReportDays & (1 << (int)now.DayOfWeek)) == 0) return;   // not a day for the report
                 if (Cfg.LastReportDate == today || now.TimeOfDay < at) return;
                 if (!CanSendReport()) return;   // no Discord set up (yet): try again later
 
@@ -1352,6 +1413,12 @@ namespace RdpPanel
                 range = "00:00 – 24:00";
             }
 
+            return await SendReportRange(from, to, title, range);
+        }
+
+        // builds a report for the period and sends it to the report webhook / channel
+        async Task<string> SendReportRange(DateTime from, DateTime to, string title, string range)
+        {
             var live = Tiles.Select(t => new DailyReport.Live { Name = t.Config.Name, Online = t.Online, Seconds = t.ConnectedSeconds, FpsReason = t.FpsReason, Hidden = hidden.Contains(t) }).ToList();
             string updLine = pendingUpdate != null && pendingUpdate.Version != Cfg.SkippedVersion
                 ? "Update available: v" + pendingUpdate.Version + " (you have v" + AppInfo.Version + ")" : null;
@@ -1361,8 +1428,8 @@ namespace RdpPanel
             foreach (var part in parts)
             {
                 string err;
-                if (Discord.IsValid(Cfg.WebhookUrl)) err = await Discord.SendAsync(Cfg.WebhookUrl, part, null);
-                else if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId)) err = await bot.PostChannelMessage(part);
+                if (Discord.IsValid(ReportHook())) err = await Hub.SendAsync(ReportHook(), part, null, "report", "");
+                else if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(ReportChannel())) err = await bot.PostChannelMessage(part, ReportChannel());
                 else return "No Discord webhook or bot channel is set up (see Settings).";
                 if (err != null) return err;
             }
@@ -1547,7 +1614,9 @@ namespace RdpPanel
                     copy.BotTokenEnc = "";
                     copy.Alts = new List<AltAccount>();   // the alt accounts have their own backup
                     copy.DiscordTargets = new List<DiscordTarget>();   // webhook links are secret
-                    foreach (var sc in copy.Sessions) { sc.PasswordEnc = ""; sc.AdminPassEnc = ""; sc.AltId = ""; }
+                    copy.CritWebhookEnc = "";
+                    copy.ReportWebhookEnc = "";
+                    foreach (var sc in copy.Sessions) { sc.PasswordEnc = ""; sc.AdminPassEnc = ""; sc.AltId = ""; sc.WebhookEnc = ""; }
                     System.IO.File.WriteAllText(sfd.FileName, ser.Serialize(copy), new System.Text.UTF8Encoding(true));
                     MessageBox.Show(this, "Saved: " + sfd.FileName + "\r\nPasswords, the webhook link and the bot token are not in this file.", "Export settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -1590,6 +1659,7 @@ namespace RdpPanel
                             isc.PasswordEnc = "";
                             isc.AdminPassEnc = "";
                             isc.AltId = "";
+                            isc.WebhookEnc = "";
                             Cfg.Sessions.Add(isc);
                             CreateTile(isc);
                             added++;
@@ -1598,7 +1668,7 @@ namespace RdpPanel
                         {
                             foreach (var f in typeof(SessionConfig).GetFields(flags))
                             {
-                                if (f.Name == "PasswordEnc" || f.Name == "AdminPassEnc" || f.Name == "AltId") continue;
+                                if (f.Name == "PasswordEnc" || f.Name == "AdminPassEnc" || f.Name == "AltId" || f.Name == "WebhookEnc") continue;
                                 f.SetValue(mine, f.GetValue(isc));
                             }
                             updated++;
@@ -1941,17 +2011,7 @@ namespace RdpPanel
             RefreshSummary();
             if (t.IsMuted) return;                   // this session is muted
             if (DateTime.Now < MuteUntil) return;   // muted with /quiet
-            // a CPU/RAM warning is less important than a session that is gone or a PC that does not respond
-            bool critical = msg.IndexOf("CPU ", StringComparison.Ordinal) < 0 || msg.IndexOf("RAM ", StringComparison.Ordinal) < 0;
-            bool sendToDiscord = (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId))
-                || (Cfg.DiscordAlerts && Discord.IsValid(Cfg.WebhookUrl));
-            if (sendToDiscord && DiscordAllowed(critical))
-            {
-                if (bot != null && bot.Running && !string.IsNullOrWhiteSpace(Cfg.BotChannelId))
-                    bot.PostAlert(t.Config.Name, msg);   // notification with buttons in the bot channel
-                else
-                    Discord.Post(Cfg.WebhookUrl, t.Config.Name, "⚠ " + msg, null);
-            }
+            Hub.Alert(t, msg);   // Discord: kinds, second webhook, bundling, own texts
             if (!Cfg.AlertsEnabled) return;
             try { notify.ShowBalloonTip(8000, "RDP Panel", msg, ToolTipIcon.Warning); } catch { }
             if (Cfg.AlertSound) System.Media.SystemSounds.Exclamation.Play();
@@ -2060,7 +2120,7 @@ namespace RdpPanel
                 string path = SavePanelFile(shot.Item1);
                 if (path != null) LogService.Write(t.Config.Name, "Screenshot", path, 0);
             }
-            if (t.IsMuted || !Cfg.DiscordOnDrop || !Discord.IsValid(Cfg.WebhookUrl) || !DiscordAllowed(true)) return;
+            if (t.IsMuted || DateTime.Now < MuteUntil) return;
 
             var files = new List<KeyValuePair<string, byte[]>>();
             string age = "";
@@ -2072,8 +2132,7 @@ namespace RdpPanel
             var own = t.LastShotJpeg();
             if (own != null && (files.Count == 0 || Cfg.DiscordShotMode == 1))
                 files.Add(new KeyValuePair<string, byte[]>(t.SafeFileName + ".jpg", own));
-            Discord.Post(Cfg.WebhookUrl, t.Config.Name,
-                "⚠ **" + t.Config.Name + "** (" + t.Config.Host + ") dropped at " + DateTime.Now.ToString("HH:mm:ss") + ".\n" + reason + age, files);
+            Hub.Dropped(t, reason, files, age);
         }
 
         // a message with the overview (whole panel or one image per session)
@@ -2268,7 +2327,7 @@ namespace RdpPanel
                 l.Add(new Tuple<string, Action>("Session: " + t.Config.Name + "   (" + t.Config.Host + ")", () => OpenTile(tile)));
                 l.Add(new Tuple<string, Action>("History (14 days): " + t.Config.Name, () => new SessionHistoryForm(this, tile.Config.Name).Show(this)));
             }
-            string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts", "Health" };
+            string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts", "Health", "Discord" };
             for (int i = 0; i < pages.Length; i++)
             {
                 int idx = i;

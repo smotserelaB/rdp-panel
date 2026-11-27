@@ -272,10 +272,16 @@ namespace RdpPanel
 
         // ------------------------------------------------------------ interactions
 
+        // commands and buttons work in the alert channel, in the command channel and in the channel of a session
         bool ChannelAllowed(string channel)
         {
-            string c = (cfg.BotChannelId ?? "").Trim();
-            return c.Length == 0 || c == channel;
+            string a = (cfg.BotChannelId ?? "").Trim();
+            string c = (cfg.BotCmdChannelId ?? "").Trim();
+            if (a.Length == 0 && c.Length == 0) return true;
+            if (channel == a || channel == c) return true;
+            foreach (var sc in cfg.Sessions.ToList())
+                if (!string.IsNullOrWhiteSpace(sc.BotChannel) && sc.BotChannel.Trim() == channel) return true;
+            return false;
         }
 
         static string WhoId(Dictionary<string, object> i)
@@ -1142,9 +1148,10 @@ namespace RdpPanel
         }
 
         // notifications with buttons in the configured channel
-        public async void PostAlert(string tileName, string msg)
+        public async void PostAlert(string tileName, string msg, string channel = null)
         {
-            if (appId.Length == 0 || string.IsNullOrWhiteSpace(cfg.BotChannelId)) return;
+            string ch = string.IsNullOrWhiteSpace(channel) ? (cfg.BotChannelId ?? "") : channel;
+            if (appId.Length == 0 || string.IsNullOrWhiteSpace(ch)) return;
             var comps = new List<object>
             {
                 O("type", 1, "components", new List<object>
@@ -1154,16 +1161,17 @@ namespace RdpPanel
                     Btn("Restart PC", "ask:r:" + tileName, 4)
                 })
             };
-            string err = await Request("POST", Api + "/channels/" + cfg.BotChannelId.Trim() + "/messages",
+            string err = await Request("POST", Api + "/channels/" + ch.Trim() + "/messages",
                 O("content", "⚠ " + Cut(msg, 1900), "components", comps), null, null);
             if (err != null) LogService.Write(tileName, "Discord", "bot message failed: " + err, 0);
         }
 
         // a plain message in the configured bot channel (used by the daily report); returns null if it worked
-        public async Task<string> PostChannelMessage(string text)
+        public async Task<string> PostChannelMessage(string text, string channel = null)
         {
-            if (appId.Length == 0 || string.IsNullOrWhiteSpace(cfg.BotChannelId)) return "bot channel is not set up";
-            return await Request("POST", Api + "/channels/" + cfg.BotChannelId.Trim() + "/messages",
+            string ch = string.IsNullOrWhiteSpace(channel) ? (cfg.BotChannelId ?? "") : channel;
+            if (appId.Length == 0 || string.IsNullOrWhiteSpace(ch)) return "bot channel is not set up";
+            return await Request("POST", Api + "/channels/" + ch.Trim() + "/messages",
                 O("content", Cut(text, 1900)), null, null);
         }
 

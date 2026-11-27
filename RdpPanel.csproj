@@ -8,7 +8,7 @@
     <AssemblyName>RdpPanel</AssemblyName>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <Version>1.6.1</Version>
+    <Version>1.7.0</Version>
     <Product>RDP Panel</Product>
     <Authors>smotserela</Authors>
     <Copyright>© 2026 smotserela</Copyright>
