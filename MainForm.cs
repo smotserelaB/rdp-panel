@@ -1546,6 +1546,7 @@ namespace RdpPanel
                     copy.WebhookEnc = "";
                     copy.BotTokenEnc = "";
                     copy.Alts = new List<AltAccount>();   // the alt accounts have their own backup
+                    copy.DiscordTargets = new List<DiscordTarget>();   // webhook links are secret
                     foreach (var sc in copy.Sessions) { sc.PasswordEnc = ""; sc.AdminPassEnc = ""; sc.AltId = ""; }
                     System.IO.File.WriteAllText(sfd.FileName, ser.Serialize(copy), new System.Text.UTF8Encoding(true));
                     MessageBox.Show(this, "Saved: " + sfd.FileName + "\r\nPasswords, the webhook link and the bot token are not in this file.", "Export settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -2265,6 +2266,7 @@ namespace RdpPanel
             {
                 var tile = t;
                 l.Add(new Tuple<string, Action>("Session: " + t.Config.Name + "   (" + t.Config.Host + ")", () => OpenTile(tile)));
+                l.Add(new Tuple<string, Action>("History (14 days): " + t.Config.Name, () => new SessionHistoryForm(this, tile.Config.Name).Show(this)));
             }
             string[] pages = { "Overview", "Monitoring", "Log", "PC management", "Profiles", "Settings", "Help", "Credits", "Alt accounts", "Health" };
             for (int i = 0; i < pages.Length; i++)

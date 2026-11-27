@@ -507,6 +507,69 @@ namespace RdpPanel
             }
         }
 
+        // sends a message with a JSON payload (for example embeds) and pictures; returns null if it worked, otherwise the error
+        public static async Task<string> SendPayloadAsync(string url, Dictionary<string, object> payload, List<KeyValuePair<string, byte[]>> files)
+        {
+            if (!IsValid(url)) return "invalid webhook link";
+            await Gate.WaitAsync();
+            try
+            {
+                string boundary = "----RdpPanel" + Guid.NewGuid().ToString("N");
+                var req = (HttpWebRequest)WebRequest.Create(url.Trim());
+                req.Method = "POST";
+                req.ContentType = "multipart/form-data; boundary=" + boundary;
+                req.UserAgent = "RdpPanel/" + AppInfo.Version;
+                req.Timeout = 30000;
+                req.ReadWriteTimeout = 30000;
+
+                using (var ms = new MemoryStream())
+                {
+                    var enc = new UTF8Encoding(false);
+                    Action<string> w = t => { var b = enc.GetBytes(t); ms.Write(b, 0, b.Length); };
+                    string json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(payload);
+                    w("--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\nContent-Type: application/json\r\n\r\n" + json + "\r\n");
+                    int i = 0;
+                    if (files != null)
+                        foreach (var f in files.Take(10))
+                        {
+                            w("--" + boundary + "\r\nContent-Disposition: form-data; name=\"files[" + i + "]\"; filename=\"" + SafeName(f.Key) + "\"\r\nContent-Type: image/jpeg\r\n\r\n");
+                            ms.Write(f.Value, 0, f.Value.Length);
+                            w("\r\n");
+                            i++;
+                        }
+                    w("--" + boundary + "--\r\n");
+                    req.ContentLength = ms.Length;
+                    using (var rs = await req.GetRequestStreamAsync())
+                    {
+                        ms.Position = 0;
+                        await ms.CopyToAsync(rs);
+                    }
+                }
+                using (var resp = (HttpWebResponse)await req.GetResponseAsync())
+                    return null;
+            }
+            catch (WebException ex)
+            {
+                string body = "";
+                try
+                {
+                    if (ex.Response != null)
+                        using (var sr = new StreamReader(ex.Response.GetResponseStream())) body = sr.ReadToEnd();
+                }
+                catch { }
+                if (body.Length > 200) body = body.Substring(0, 200);
+                return ex.Message + (body.Length > 0 ? " – " + body : "");
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+            finally
+            {
+                Gate.Release();
+            }
+        }
+
         // send in the background; an error goes to the log
         public static async void Post(string url, string session, string content, List<KeyValuePair<string, byte[]>> files)
         {

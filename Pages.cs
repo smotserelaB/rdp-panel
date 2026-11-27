@@ -70,7 +70,13 @@ namespace RdpPanel
                     Rebuild();
                     main.RebuildPerfOverview();
                 };
+                var hist14 = Theme.MakeButton("📈  14 days");
+                hist14.AutoSize = false;
+                hist14.Dock = DockStyle.Right;
+                hist14.Width = 110;
+                hist14.Click += (s, e) => new SessionHistoryForm(main, tile.Config.Name).Show(main);
                 bottom.Controls.Add(vals);
+                bottom.Controls.Add(hist14);
                 bottom.Controls.Add(rm);
                 var chart = new Spark { Dock = DockStyle.Fill, Grid = true, MaxPoints = 360, BackColor = Theme.Surface };
                 chart.Lines.Add(new Spark.Series { V = t.CpuHist, C = Theme.Accent });
@@ -107,8 +113,15 @@ namespace RdpPanel
     {
         readonly MainForm main;
         readonly DateTimePicker dtp = new DateTimePicker { Format = DateTimePickerFormat.Short, Width = 130 };
+        readonly ComboBox cmbRange = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly ComboBox cmbSession = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly ComboBox cmbEvent = new DarkCombo { DropDownStyle = ComboBoxStyle.DropDownList };
+        readonly TextBox txtFind = new TextBox();
+        readonly Label lblLog = new Label { Text = "Events", Dock = DockStyle.Top, Height = 32, ForeColor = Theme.Fg, Font = Theme.UI(10f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
         readonly ListView lvSum = UI.NewList();
         readonly ListView lvLog = UI.NewList();
+        List<LogService.Entry> shown = new List<LogService.Entry>();
+        bool filling;
 
         public LogPage(MainForm main)
         {
@@ -130,15 +143,29 @@ namespace RdpPanel
             lvLog.Columns.Add("Details", 520);
             lvLog.Dock = DockStyle.Fill;
 
-            var lblLog = new Label { Text = "Events", Dock = DockStyle.Top, Height = 32, ForeColor = Theme.Fg, Font = Theme.UI(10f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
             var lblSum = new Label { Text = "Summary per session", Dock = DockStyle.Top, Height = 32, ForeColor = Theme.Fg, Font = Theme.UI(10f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
-            var top = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Theme.Bg };
-            UI.Lbl(top, "Day:", 0, 10, 40, true);
-            dtp.Location = new Point(44, 6);
+            var top = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Bg };
+
+            // row 1: which days
+            UI.Lbl(top, "Day:", 0, 12, 40, true);
+            dtp.Location = new Point(44, 8);
             Theme.StyleInput(dtp);
             top.Controls.Add(dtp);
-            var shots = UI.Btn(top, "Open screenshots", 200, 3, 210, false);
+            foreach (var t in new[] { "Only this day", "Last 7 days", "Last 30 days", "All days" }) cmbRange.Items.Add(t);
+            cmbRange.SelectedIndex = 0;
+            UI.Put(top, cmbRange, 196, 8, 150);
+            var shots = UI.Btn(top, "Open screenshots", 362, 4, 180, false);
             shots.Click += (s, e) => OpenShots();
+            var export = UI.Btn(top, "Export to CSV", 550, 4, 150, false);
+            export.Click += (s, e) => ExportCsv();
+
+            // row 2: filters
+            UI.Lbl(top, "Session:", 0, 56, 60, true);
+            UI.Put(top, cmbSession, 64, 52, 190);
+            UI.Lbl(top, "Event:", 272, 56, 50, true);
+            UI.Put(top, cmbEvent, 326, 52, 160);
+            UI.Lbl(top, "Find:", 504, 56, 40, true);
+            UI.Put(top, txtFind, 546, 52, 200);
 
             Controls.Add(lvLog);
             Controls.Add(lblLog);
@@ -146,7 +173,11 @@ namespace RdpPanel
             Controls.Add(lblSum);
             Controls.Add(top);
 
-            dtp.ValueChanged += (s, e) => RefreshData();
+            dtp.ValueChanged += (s, e) => { if (cmbRange.SelectedIndex == 0) RefreshData(); };
+            cmbRange.SelectedIndexChanged += (s, e) => { dtp.Enabled = cmbRange.SelectedIndex == 0; RefreshData(); };
+            cmbSession.SelectedIndexChanged += (s, e) => RefreshData();
+            cmbEvent.SelectedIndexChanged += (s, e) => RefreshData();
+            txtFind.TextChanged += (s, e) => RefreshData();
         }
 
         static void OpenShots()
@@ -159,24 +190,77 @@ namespace RdpPanel
             catch { }
         }
 
+        static string Q(string v)
+        {
+            return "\"" + (v ?? "").Replace("\"", "\"\"") + "\"";
+        }
+
+        // the events that are on the screen now (with the filters), as a file
+        void ExportCsv()
+        {
+            using (var sfd = new SaveFileDialog { Title = "Export the log", Filter = "CSV file|*.csv", FileName = "rdp-panel-log-" + DateTime.Now.ToString("yyyyMMdd") + ".csv" })
+            {
+                if (sfd.ShowDialog(main) != DialogResult.OK) return;
+                try
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.AppendLine("\"Time\";\"Session\";\"Event\";\"Details\";\"Seconds\"");
+                    foreach (var e in shown.OrderBy(x => x.Time))
+                        sb.AppendLine(string.Join(";", new[] { Q(e.Time.ToString("yyyy-MM-dd HH:mm:ss")), Q(e.Session), Q(e.Event), Q(e.Detail), e.Seconds.ToString() }));
+                    System.IO.File.WriteAllText(sfd.FileName, sb.ToString(), new System.Text.UTF8Encoding(true));
+                    MessageBox.Show(main, shown.Count + " event(s) saved in " + sfd.FileName, "Log", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex) { MessageBox.Show(main, "Export failed: " + ex.Message, "Log", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            }
+        }
+
+        void FillCombo(ComboBox cb, string all, IEnumerable<string> items)
+        {
+            string keep = cb.SelectedItem as string;
+            cb.Items.Clear();
+            cb.Items.Add(all);
+            foreach (var i in items) cb.Items.Add(i);
+            int idx = keep == null ? 0 : cb.Items.IndexOf(keep);
+            cb.SelectedIndex = idx < 0 ? 0 : idx;
+        }
+
         public void RefreshData()
         {
+            if (filling) return;
             var day = dtp.Value.Date;
-            bool today = day == DateTime.Today;
+            DateTime from, to = DateTime.Today.AddDays(1);
+            switch (cmbRange.SelectedIndex)
+            {
+                case 1: from = DateTime.Today.AddDays(-6); break;
+                case 2: from = DateTime.Today.AddDays(-29); break;
+                case 3: from = DateTime.MinValue; break;
+                default: from = day; to = day.AddDays(1); break;
+            }
+            bool incToday = from <= DateTime.Today && to > DateTime.Today;
             var running = main.RunningSeconds();
-            var entries = LogService.ReadAll().Where(e => e.Time.Date == day).ToList();
+            var inRange = LogService.ReadAll().Where(e => e.Time >= from && e.Time < to).ToList();
 
-            var names = entries.Select(e => e.Session).Where(n => n.Length > 0).Distinct().ToList();
-            if (today) foreach (var k in running.Keys) if (!names.Contains(k)) names.Add(k);
+            var names = inRange.Select(e => e.Session).Where(n => n.Length > 0).Distinct().ToList();
+            if (incToday) foreach (var k in running.Keys) if (!names.Contains(k)) names.Add(k);
+            names = names.OrderBy(x => x).ToList();
+
+            filling = true;
+            FillCombo(cmbSession, "All sessions", names);
+            FillCombo(cmbEvent, "All events", inRange.Select(e => e.Event).Where(x => x.Length > 0).Distinct().OrderBy(x => x));
+            filling = false;
+
+            string sessFilter = cmbSession.SelectedIndex > 0 ? cmbSession.SelectedItem as string : null;
+            string evFilter = cmbEvent.SelectedIndex > 0 ? cmbEvent.SelectedItem as string : null;
+            string find = txtFind.Text.Trim().ToLowerInvariant();
 
             lvSum.BeginUpdate();
             lvSum.Items.Clear();
-            foreach (var n in names.OrderBy(x => x))
+            foreach (var n in names.Where(x => sessFilter == null || x == sessFilter))
             {
-                int secs = entries.Where(e => e.Session == n && e.Event == "Disconnected").Sum(e => e.Seconds);
-                if (today && running.ContainsKey(n)) secs += running[n];
-                int times = entries.Count(e => e.Session == n && e.Event == "Connected");
-                int drops = entries.Count(e => e.Session == n &&
+                int secs = inRange.Where(e => e.Session == n && e.Event == "Disconnected").Sum(e => e.Seconds);
+                if (incToday && running.ContainsKey(n)) secs += running[n];
+                int times = inRange.Count(e => e.Session == n && e.Event == "Connected");
+                int drops = inRange.Count(e => e.Session == n &&
                     ((e.Event == "Disconnected" && e.Detail != DiscReasons.ByUser && e.Detail != "Reconnect") || e.Event == "Failed"));
                 var it = new ListViewItem(n);
                 it.SubItems.Add(UI.Dur(secs));
@@ -186,9 +270,15 @@ namespace RdpPanel
             }
             lvSum.EndUpdate();
 
+            shown = inRange.Where(e => (sessFilter == null || e.Session == sessFilter)
+                                    && (evFilter == null || e.Event == evFilter)
+                                    && (find.Length == 0 || (e.Session + " " + e.Event + " " + e.Detail).ToLowerInvariant().Contains(find)))
+                           .OrderByDescending(x => x.Time).ToList();
+            lblLog.Text = "Events (" + shown.Count + ")";
+
             lvLog.BeginUpdate();
             lvLog.Items.Clear();
-            foreach (var e in entries.OrderByDescending(x => x.Time))
+            foreach (var e in shown.Take(3000))
             {
                 var it = new ListViewItem(e.Time.ToString("dd-MM-yyyy HH:mm:ss"));
                 it.SubItems.Add(e.Session);

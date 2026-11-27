@@ -23,6 +23,19 @@ namespace RdpPanel
         }
     }
 
+    public class DiscordTarget
+    {
+        public string Name = "";
+        public string UrlEnc = "";
+
+        [ScriptIgnore]
+        public string Url
+        {
+            get { return Secret.Unprotect(UrlEnc); }
+            set { UrlEnc = Secret.Protect(value); }
+        }
+    }
+
     public class SessionConfig
     {
         public string Name = "Session";
@@ -142,6 +155,10 @@ namespace RdpPanel
         public bool EverConnected;       // a session was connected at least once (for that card)
         public int AltSort;              // sort of the Alt accounts tab: 0 = my order, 1 = name, 2 = kind, 3.. = most of an item
         public bool CompactView;         // small tiles: only the header with status, CPU and RAM
+
+        // saved webhooks you can choose from (for example for the alt accounts); the links are encrypted
+        public List<DiscordTarget> DiscordTargets = new List<DiscordTarget>();
+        public string AltTargetName = "";   // the destination used last time for the alt accounts
 
         [ScriptIgnore]
         public string WebhookUrl

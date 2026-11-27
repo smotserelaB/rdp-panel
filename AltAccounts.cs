@@ -9,6 +9,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -785,78 +786,139 @@ namespace RdpPanel
             }
         }
 
-        // the data of one alt as a Discord message (max 1900 characters)
-        string DiscordText(AltAccount a)
+        // ---------- to Discord, as cards in the chat (embeds) ----------
+
+        static string Bar(double ratio)
         {
-            var sc = main.Cfg.Sessions.FirstOrDefault(x => x.AltId == a.Id);
-            var sb = new StringBuilder();
-            sb.Append("**" + a.Name + "**");
-            if (!string.IsNullOrWhiteSpace(a.Kind)) sb.Append(" · " + a.Kind);
-            if (sc != null) sb.Append(" · session: " + sc.Name);
-            sb.AppendLine();
-            sb.AppendLine(string.Join("   ", Items.Select(i => i.Emoji + " " + i.Label + ": **" + i.Get(a).ToString("N0") + "**")));
-            var goals = new List<string>();
-            foreach (var i in Items)
-            {
-                long g;
-                if (a.Goals.TryGetValue(i.Label, out g) && g > 0)
-                    goals.Add(i.Emoji + " " + Math.Min(999, (int)(i.Get(a) * 100 / g)) + "% (" + i.Get(a).ToString("N0") + " / " + g.ToString("N0") + ")");
-            }
-            if (goals.Count > 0) sb.AppendLine("🎯 Goals: " + string.Join("   ", goals));
-            if (!string.IsNullOrWhiteSpace(a.Note)) sb.AppendLine("📝 " + a.Note);
-            if (a.LastUpdatedTicks > 0) sb.AppendLine("🕒 Updated: " + new DateTime(a.LastUpdatedTicks).ToString("dd-MM-yyyy HH:mm"));
-            string text = sb.ToString().TrimEnd();
-            return text.Length > 1890 ? text.Substring(0, 1890) : text;
+            int n = (int)Math.Round(Math.Max(0, Math.Min(1, ratio)) * 10);
+            return new string('▰', n) + new string('▱', 10 - n);
         }
 
-        // sends every alt (with its hive picture) to the Discord webhook of the panel
+        static Dictionary<string, object> Field(string name, string value, bool inline)
+        {
+            return new Dictionary<string, object> { { "name", name }, { "value", value.Length > 1000 ? value.Substring(0, 1000) : value }, { "inline", inline } };
+        }
+
+        // one alt as a card: numbers as fields, goals with a progress bar, the hive picture below
+        Dictionary<string, object> AltEmbed(AltAccount a, string imageName)
+        {
+            var sc = main.Cfg.Sessions.FirstOrDefault(x => x.AltId == a.Id);
+            var tile = sc == null ? null : main.Tiles.FirstOrDefault(t => t.Config == sc);
+            var desc = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(a.Kind)) desc.AppendLine("*" + a.Kind + "*");
+            if (sc != null) desc.AppendLine("🖥 " + sc.Name + (tile == null ? "" : tile.Online ? "   🟢 online" : "   ⚪ offline"));
+
+            var fields = new List<object>();
+            foreach (var i in Items)
+            {
+                long v = i.Get(a);
+                long g;
+                a.Goals.TryGetValue(i.Label, out g);
+                string value = "**" + v.ToString("N0") + "**";
+                if (g > 0)
+                {
+                    double r = (double)v / g;
+                    value += "\n" + Bar(r) + " " + Math.Min(999, (int)(r * 100)) + "%" + (v >= g ? " ✅" : "") + "\ngoal " + g.ToString("N0");
+                }
+                fields.Add(Field(i.Emoji + " " + i.Label, value, true));
+            }
+            if (!string.IsNullOrWhiteSpace(a.Note)) fields.Add(Field("📝 Note", a.Note, false));
+
+            string footer = (a.LastUpdatedTicks > 0 ? "Updated " + new DateTime(a.LastUpdatedTicks).ToString("dd-MM-yyyy HH:mm") + "  ·  " : "") + "RDP Panel v" + AppInfo.Version;
+            var embed = new Dictionary<string, object>
+            {
+                { "title", "🐝  " + (string.IsNullOrWhiteSpace(a.Name) ? "Alt" : a.Name) },
+                { "description", desc.ToString().TrimEnd() },
+                { "color", tile != null && tile.Online ? 3066993 : 16103424 },   // green when its session is online, else honey yellow
+                { "fields", fields },
+                { "footer", new Dictionary<string, object> { { "text", footer } } }
+            };
+            if (imageName != null) embed["image"] = new Dictionary<string, object> { { "url", "attachment://" + imageName } };
+            return embed;
+        }
+
+        Dictionary<string, object> OverviewEmbed(List<AltAccount> list)
+        {
+            var sb = new StringBuilder();
+            foreach (var a in list)
+                sb.AppendLine("• **" + a.Name + "**" + (string.IsNullOrWhiteSpace(a.Kind) ? "" : "  –  " + a.Kind));
+            string text = sb.ToString().TrimEnd();
+            if (text.Length > 3500) text = text.Substring(0, 3500) + "…";
+            return new Dictionary<string, object>
+            {
+                { "title", "🐝  Alt accounts" },
+                { "description", text },
+                { "color", 5793266 },
+                { "footer", new Dictionary<string, object> { { "text", list.Count + " alt" + (list.Count == 1 ? "" : "s") + "  ·  " + DateTime.Now.ToString("dd-MM-yyyy HH:mm") + "  ·  RDP Panel v" + AppInfo.Version } } }
+            };
+        }
+
+        Dictionary<string, object> TotalEmbed(List<AltAccount> list)
+        {
+            var fields = new List<object>();
+            foreach (var i in Items) fields.Add(Field(i.Emoji + " " + i.Label, "**" + list.Sum(x => i.Get(x)).ToString("N0") + "**", true));
+            return new Dictionary<string, object>
+            {
+                { "title", "Σ  Total of all alts" },
+                { "color", 5793266 },
+                { "fields", fields }
+            };
+        }
+
+        Task<string> SendEmbed(string url, Dictionary<string, object> embed, List<KeyValuePair<string, byte[]>> files)
+        {
+            var payload = new Dictionary<string, object> { { "username", "RDP Panel" }, { "embeds", new List<object> { embed } } };
+            return Discord.SendPayloadAsync(url, payload, files);
+        }
+
+        // choose where it goes and what, then send every alt as a card
         async void ExportToDiscord()
         {
-            string url = main.Cfg.WebhookUrl;
-            if (!Discord.IsValid(url))
-            {
-                MessageBox.Show(main, "There is no Discord webhook yet.\r\nPut the link of your webhook in Settings (Discord webhook) and press Save.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            var alts = main.Cfg.Alts.ToList();
-            if (alts.Count == 0)
+            if (main.Cfg.Alts.Count == 0)
             {
                 MessageBox.Show(main, "There are no alt accounts to send.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (MessageBox.Show(main, "Send the data of " + alts.Count + " alt account(s), with their hive pictures, to your Discord webhook?", "Alt accounts",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            string url;
+            List<AltAccount> chosen;
+            bool pics, overview;
+            using (var d = new AltDiscordDialog(main))
+            {
+                if (d.ShowDialog(main) != DialogResult.OK) return;
+                url = d.Url;
+                chosen = d.Chosen.ToList();
+                pics = d.WithPictures;
+                overview = d.WithOverview;
+            }
 
             btnDiscord.Enabled = false;
             string oldText = btnDiscord.Text;
-            btnDiscord.Text = "Sending…";
             string err = null;
             try
             {
-                err = await Discord.SendAsync(url, "🐝 **Alt accounts** · " + DateTime.Now.ToString("dd-MM-yyyy HH:mm") + " · " + alts.Count + " alt" + (alts.Count == 1 ? "" : "s"), null);
-                for (int k = 0; err == null && k < alts.Count; k++)
+                btnDiscord.Text = "Sending…";
+                if (overview) err = await SendEmbed(url, OverviewEmbed(chosen), null);
+                for (int k = 0; err == null && k < chosen.Count; k++)
                 {
-                    var a = alts[k];
+                    btnDiscord.Text = "Sending " + (k + 1) + "/" + chosen.Count + "…";
+                    var a = chosen[k];
                     List<KeyValuePair<string, byte[]>> files = null;
+                    string imageName = null;
                     string p = ImagePath(a);
-                    if (p.Length > 0 && File.Exists(p))
+                    if (pics && p.Length > 0 && File.Exists(p))
                     {
-                        files = new List<KeyValuePair<string, byte[]>>();
-                        files.Add(new KeyValuePair<string, byte[]>((string.IsNullOrWhiteSpace(a.Name) ? "hive" : a.Name) + ".jpg", File.ReadAllBytes(p)));
+                        imageName = "hive-" + (k + 1) + ".jpg";
+                        files = new List<KeyValuePair<string, byte[]>> { new KeyValuePair<string, byte[]>(imageName, File.ReadAllBytes(p)) };
                     }
-                    err = await Discord.SendAsync(url, DiscordText(a), files);
-                    if (err == null) await System.Threading.Tasks.Task.Delay(600);
+                    err = await SendEmbed(url, AltEmbed(a, imageName), files);
+                    if (err == null) await Task.Delay(700);
                 }
-                if (err == null)
-                {
-                    var tot = Items.Select(i => i.Emoji + " " + i.Label + ": **" + alts.Sum(x => i.Get(x)).ToString("N0") + "**");
-                    err = await Discord.SendAsync(url, "**Total of all alts**\r\n" + string.Join("   ", tot), null);
-                }
+                if (err == null && overview) err = await SendEmbed(url, TotalEmbed(chosen), null);
             }
             catch (Exception ex) { err = ex.Message; }
             btnDiscord.Text = oldText;
             btnDiscord.Enabled = true;
-            if (err == null) MessageBox.Show(main, "Sent " + alts.Count + " alt account(s) to Discord.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (err == null) MessageBox.Show(main, "Sent " + chosen.Count + " alt account(s) to Discord.", "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
             else MessageBox.Show(main, "Sending to Discord failed: " + err, "Alt accounts", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
